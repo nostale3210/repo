@@ -1,4 +1,4 @@
-name: build-hald-utils
+name: build-repo-utils
 on:
   pull_request:
     schedule:
@@ -10,6 +10,7 @@ on:
       - 'init/**'
       - 'scripts/**'
       - 'repo'
+      - 'Containerfile'
       - '.github/workflows/build-repo-image.yml'
   workflow_dispatch:
 
