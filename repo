@@ -3,8 +3,7 @@ set -oue pipefail
 
 CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
 SUBCMD="${1-error}"
-SYSROOT="${2-}"
-echo "$SYSROOT"
+SYSROOT="${2-$(pwd)}"
 
 get_pkg_list() {
     local list="$1"
@@ -36,8 +35,8 @@ dnf_install() {
     podman exec repo-build bash -c "mkdir -p /.repo/store/$pkg
         cd /.repo/store/$pkg
         rpm -qp --scripts /tmp/${pkg_split[0]}*.rpm > scripts
-        rpm2cpio /tmp/${pkg_split[0]}*.rpm | cpio -idm
-        rm /tmp/${pkg_split[0]}*.rpm" || :
+        rpm2cpio /tmp/${pkg_split[0]}*.rpm | cpio -idm || exit 1
+        rm /tmp/${pkg_split[0]}*.rpm" || exit 1
     cd "$SYSROOT/.repo/store/$pkg" &&
         split_scriptlets "$(cat scripts)"
 }
