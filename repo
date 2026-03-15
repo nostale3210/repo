@@ -2,8 +2,13 @@
 set -oue pipefail
 
 CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
-SUBCMD="${1-error}"
-SYSROOT="${2-$(pwd)}"
+SUBCMD="${1-none}"
+
+if [[ "$*" == *"--rootd"* ]]; then
+    SYSROOT="${*: -1}"
+else
+    SYSROOT=""
+fi
 
 get_pkg_list() {
     local list="$1"
@@ -242,6 +247,44 @@ install_package() {
         rsync -aHlx "/.repo/store/$pkg/etc/" "/.repo/deployments/$deployment/etc/" &>/dev/null
 }
 
+activate_dep() {
+    local deployment="$1"
+    local cur_dep
+    cur_dep="$(cat "$SYSROOT/usr/.repo")"
+
+    if [[ "$deployment" == "$cur_dep" ]]; then
+        printf "%s is already activated. Exiting..." "$deployment"
+        exit 0
+    fi
+
+    if [[ -d "$SYSROOT/.repo/empty" ]]; then
+        rm -rf "$SYSROOT/.repo/empty/"{*,.*}
+    else
+        mkdir "$SYSROOT/.repo/empty"
+    fi
+
+    if mountpoint -q "$SYSROOT/usr"; then
+        mount --make-private "$SYSROOT/usr"
+        mount -t overlay usr-root --make-private \
+            -o lowerdir="$SYSROOT/.repo/empty:$SYSROOT/.repo/deployments/$deployment/usr" \
+            "$SYSROOT/.repo/empty"
+        move-mount -mb "$SYSROOT/.repo/empty" "$SYSROOT/usr"
+        umount -fl "$SYSROOT/usr"
+    else
+        mount -t overlay usr-root --make-private \
+            -o lowerdir="$SYSROOT/.repo/empty:$SYSROOT/.repo/deployments/$deployment/usr" \
+            "$SYSROOT/usr"
+    fi
+
+    if mountpoint -q "$SYSROOT/etc"; then
+        mount --make-private "$SYSROOT/etc"
+        move-mount -db "$SYSROOT/.repo/deployments/$deployment/etc" "$SYSROOT/etc"
+        umount -fl "$SYSROOT/etc"
+    else
+        mount -o bind --make-private "$SYSROOT/.repo/deployments/$deployment/etc" "$SYSROOT/etc"
+    fi
+}
+
 find_orphans() {
     local op="$1"
     podman start repo-build
@@ -261,6 +304,8 @@ find_orphans() {
         printf "%s" "$orphans" | sed "s/^/\/.repo\/store\//" | xargs podman exec repo-build \
             rm -rf
     fi
+
+    podman stop -t 2 repo-build &>/dev/null
 }
 
 dep() {
@@ -326,6 +371,8 @@ dep() {
         export -n split_scriptlets
         export -n run_package_scripts
     fi
+
+    podman stop -t 2 repo-build &>/dev/null
 }
 
 case "$SUBCMD" in
@@ -353,6 +400,8 @@ case "$SUBCMD" in
         printf "Removing unused store paths...\n"
         find_orphans "rm"
         ;;
+    "activate")
+        printf "Activating deployment %s" "$2"
+        activate_dep "$2"
+        ;;
 esac
-
-podman stop -t 2 repo-build &>/dev/null
