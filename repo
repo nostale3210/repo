@@ -141,6 +141,8 @@ create_deployment() {
     podman exec repo-build mkdir -p "/.repo/deployments/$next_dep/usr/lib"
     podman exec repo-build mkdir -p "/.repo/deployments/$next_dep/etc"
     printf "%s" "$dnf_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
+    printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
+    mkdir "$SYSROOT/boot/$next_dep"
 
     mkdir -p "$SYSROOT/.repo/deployments/$next_dep/"{dev,proc,run,sys,tmp}
     mount -t proc /proc "$SYSROOT/.repo/deployments/$next_dep/proc/"
@@ -177,6 +179,45 @@ create_deployment() {
     fi
 
     umount -Rf "$SYSROOT/.repo/deployments/$next_dep/"*
+
+    system_config "$next_dep"
+
+    boot_files "$next_dep"
+}
+
+system_config() {
+    local deployment="$1"
+
+    printf "Syncing system config..."
+    find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
+    find "$SYSROOT/etc" -newermt @0 2>/dev/null | xargs -I {} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/"
+
+    cp -rfa --parents "$SYSROOT/etc/fstab" "$SYSROOT/etc/crypttab" "$SYSROOT/etc/locale.conf" \
+        "$SYSROOT/etc/localtime" "$SYSROOT/etc/adjtime" "$SYSROOT/etc/sudoers.d" \
+        "$SYSROOT/etc/group" "$SYSROOT/etc/gshadow" "$SYSROOT/etc/subgid" "$SYSROOT/etc/subuid" \
+        "$SYSROOT/etc/NetworkManager/system-connections" "$SYSROOT/etc/vconsole.conf" \
+        "$SYSROOT/etc/pki" "$SYSROOT/etc/firewalld" "$SYSROOT/etc/environment" \
+        "$SYSROOT/etc/hostname" "$SYSROOT/etc/X11/xorg.conf.d/00-keyboard.conf" \
+        "$SYSROOT/etc/sudoers" "$SYSROOT/etc/ald" \
+        "$SYSROOT/.repo/deployments/$deployment/" 2>/dev/null
+
+    sort "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployments/etc/passwd" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
+    sort "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployments/etc/shadow" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
+    sort "$SYSROOT/etc/group" "$SYSROOT/.repo/deployments/$deployments/etc/group" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/group"
+}
+
+boot_files() {
+    local deployment="$1"
+
+    printf "Placing kernel and initramfs...\n"
+    kernel="$(find "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules" -name vmlinuz | sort | tail -n1)"
+    initrd="$(find "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules" -name initramfs.img | sort | tail -n1)"
+
+    cp -fa "$kernel" "$SYSROOT/boot/$deployment/vmlinuz"
+    cp -fa "$initrd" "$SYSROOT/boot/$deployment/initramfs.img"
+
+    printf "Creating boot entry...\n"
+    cat "$SYSROOT/etc/repo/boot.conf" | sed "s/INSERT_DEPLOYMENT/$deployment/g" > "$SYSROOT/boot/loader/entries/$deployment.conf"
 }
 
 install_package() {
