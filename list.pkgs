@@ -1,0 +1,69 @@
+sudo
+# adw-gtk3-theme
+# adwaita-fonts-all
+bash
+# bluez
+curl
+# distrobox
+dracut
+# duperemove
+e2fsprogs
+# fedora-release
+# fedora-release-identity-basic
+# fedora-workstation-backgrounds
+fira-code-fonts
+flatpak
+# fwupd-efi
+gawk
+gcc
+git-core
+glibc
+greetd
+inotify-tools
+kernel
+kernel-core
+kernel-devel-matched
+kernel-modules
+kernel-modules-extra
+kmod
+# langpacks-en
+# langtable
+libgcc
+linux-firmware
+# man-db
+# man-pages
+microcode_ctl
+mokutil
+neovim
+openssl
+osinfo-db
+# pipewire-jack-audio-connection-kit
+# pipewire-plugin-libcamera
+# plymouth
+# plymouth-system-theme
+podman
+policycoreutils
+rsync
+# sane-airscan
+# sane-backends
+# sane-backends-drivers-cameras
+# sane-backends-drivers-scanners
+sdubby
+skopeo
+systemd
+systemd-boot-unsigned
+systemd-ukify
+# thermald
+tpm2-tools
+unzip
+upower
+# wl-clipboard
+# xdg-desktop-portal
+# xdg-desktop-portal-gtk
+# xdg-user-dirs
+# xdg-user-dirs-gtk
+# xfsdump
+# xfsprogs-xfs_scrub
+zsh
+zsh-autosuggestions
+zsh-syntax-highlighting
