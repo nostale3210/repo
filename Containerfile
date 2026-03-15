@@ -1,6 +1,6 @@
 FROM alpine:latest AS build
 
-RUN apk add --no-cache git curl gcc g++
+RUN apk add --no-cache git build-base linux-headers
 
 RUN cd / && git clone https://github.com/brauner/move-mount-beneath.git && \
     cd move-mount-beneath && gcc -static move-mount.c -o move-mount && mv move-mount /move-mount
