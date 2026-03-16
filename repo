@@ -41,7 +41,7 @@ dnf_install() {
         cd /.repo/store/$pkg
         rpm -qp --scripts /tmp/${pkg_split[0]}*.rpm > scripts
         rpm2cpio /tmp/${pkg_split[0]}*.rpm | cpio -idm || exit 1
-        rm /tmp/${pkg_split[0]}*.rpm" || exit 1
+        rm /tmp/${pkg_split[0]}*.rpm" || { rm -rf "$SYSROOT/.repo/store/$pkg"; exit 1; }
     cd "$SYSROOT/.repo/store/$pkg" &&
         split_scriptlets "$(cat scripts)"
 }
@@ -178,7 +178,7 @@ create_deployment() {
         bash -c 'run_package_scripts "$next_dep" "$@"' _ {} || :
 
     printf "Running post script...\n"
-    if [[ -f scripts/post.sh ]]; then
+    if [[ -f "$SYSROOT/etc/repo/scripts/post.sh" ]]; then
         podman exec repo-build \
             chroot "/.repo/deployments/$next_dep" /usr/bin/bash /post.sh
     fi
@@ -316,7 +316,7 @@ dep() {
     if [[ "$replace" == "1" ]]; then
         podman create --name repo-build --replace -ti \
             --volume "$SYSROOT/.repo":/.repo \
-            --volume "$SYSROOT/scripts":/scripts \
+            --volume "$SYSROOT/etc/repo/scripts":/scripts \
             "$CONTAINER_IMAGE"
     fi
     podman start repo-build
@@ -327,14 +327,14 @@ dep() {
         podman exec repo-build dnf check-upgrade --refresh -y
     fi
 
-    if [[ -f scripts/pre.sh ]]; then
+    if [[ -f "$SYSROOT/etc/repo/scripts/pre.sh" ]]; then
         printf "Running pre script...\n"
         podman exec repo-build \
             bash /scripts/pre.sh
     fi
 
     declare pkg_list
-    pkg_list="$(get_pkg_list "list.pkgs")"
+    pkg_list="$(get_pkg_list "$SYSROOT/etc/repo/list.pkgs")"
     declare store_pkgs
     store_pkgs="$(podman exec repo-build \
         find /.repo/store -mindepth 1 -maxdepth 1)"
