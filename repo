@@ -112,7 +112,8 @@ run_package_scripts() {
                 ;;
         esac
         cp "$script" "$SYSROOT/.repo/deployments/$deployment/$script"
-        chroot "$SYSROOT/.repo/deployments/$deployment" /usr/bin/bash "/$script" "$arg1"
+        chroot "$SYSROOT/.repo/deployments/$deployment" \
+            /usr/bin/env PATH="/usr/bin" bash "/$script" "$arg1"
         rm "$SYSROOT/.repo/deployments/$deployment/$script"
     done
 }
@@ -167,14 +168,18 @@ create_deployment() {
     ln -s usr/bin "$SYSROOT/.repo/deployments/$next_dep/bin"
     ln -s usr/sbin "$SYSROOT/.repo/deployments/$next_dep/sbin"
     ln -s bin "$SYSROOT/.repo/deployments/$next_dep/usr/sbin"
-    cp "$SYSROOT/etc/repo/scripts/post.sh" "/.repo/deployments/$next_dep/post.sh"
+    cp "$SYSROOT/etc/repo/scripts/post.sh" "$SYSROOT/.repo/deployments/$next_dep/post.sh"
 
     printf "%s" "$dnf_transaction" | xargs -I{} \
         bash -c 'run_package_scripts "$next_dep" "$@"' _ {} || :
 
+    install_repo "$next_dep"
+
     printf "Running post script...\n"
     if [[ -f "$SYSROOT/etc/repo/scripts/post.sh" ]]; then
-        chroot "$SYSROOT/.repo/deployments/$next_dep" /usr/bin/bash /post.sh
+        cp "$SYSROOT/etc/repo/scripts/post.sh" "$SYSROOT/.repo/deployments/$next_dep/post.sh"
+        chroot "$SYSROOT/.repo/deployments/$next_dep" \
+            /usr/bin/env "PATH=/usr/bin" bash /post.sh
     fi
 
     system_config "$next_dep"
@@ -183,13 +188,13 @@ create_deployment() {
 
     selinux_policy "$next_dep"
 
-    umount -Rf "$SYSROOT/.repo/deployments/$next_dep/"*
+    umount -Rf "$SYSROOT/.repo/deployments/$next_dep/"* || :
 }
 
 system_config() {
     local deployment="$1"
 
-    printf "Syncing system config..."
+    printf "Syncing system config...\n"
     find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
     find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/" || :
 
@@ -202,9 +207,9 @@ system_config() {
         "$SYSROOT/etc/sudoers" "$SYSROOT/etc/ald" \
         "$SYSROOT/.repo/deployments/$deployment/" 2>/dev/null || :
 
-    sort "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployments/etc/passwd" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
-    sort "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployments/etc/shadow" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
-    sort "$SYSROOT/etc/group" "$SYSROOT/.repo/deployments/$deployments/etc/group" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/group"
+    sort "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployment/etc/passwd" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
+    sort "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployment/etc/shadow" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
+    sort "$SYSROOT/etc/group" "$SYSROOT/.repo/deployments/$deployment/etc/group" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/group"
 }
 
 boot_files() {
@@ -257,31 +262,28 @@ install_package() {
     local pkg_dirs
     local pkg_files
     printf "Installing %s\n" "$pkg"
-    podman exec repo-build \
-        rsync -aHlx --link-dest="../../../store/$pkg/usr/" \
-        "/.repo/store/$pkg/usr/" \
-        "/.repo/deployments/$deployment/usr/" &>/dev/null
-    podman exec repo-build \
-        rsync -aHlx --link-dest="../../../../store/$pkg/lib/" \
-        "/.repo/store/$pkg/lib/" \
-        "/.repo/deployments/$deployment/usr/lib/" &>/dev/null
-    podman exec repo-build \
-        rsync -aHlx --link-dest="../../../../store/$pkg/lib64/" \
-        "/.repo/store/$pkg/lib64/" \
-        "/.repo/deployments/$deployment/usr/lib64/" &>/dev/null
-    podman exec repo-build \
-        rsync -aHlx "/.repo/store/$pkg/etc/" "/.repo/deployments/$deployment/etc/" &>/dev/null
+    rsync -aHlx --link-dest="../../../store/$pkg/usr/" \
+        "$SYSROOT/.repo/store/$pkg/usr/" \
+        "$SYSROOT/.repo/deployments/$deployment/usr/" &>/dev/null
+    rsync -aHlx --link-dest="../../../../store/$pkg/lib/" \
+        "$SYSROOT/.repo/store/$pkg/lib/" \
+        "$SYSROOT/.repo/deployments/$deployment/usr/lib/" &>/dev/null
+    rsync -aHlx --link-dest="../../../../store/$pkg/lib64/" \
+        "$SYSROOT/.repo/store/$pkg/lib64/" \
+        "$SYSROOT/.repo/deployments/$deployment/usr/lib64/" &>/dev/null
+    rsync -aHlx "$SYSROOT/.repo/store/$pkg/etc/" "$SYSROOT/.repo/deployments/$deployment/etc/" &>/dev/null
 }
 
 selinux_policy() {
     local deployment="$1"
 
     printf "Relabeling deployment %s...\n" "$deployment"
-    podman exec repo-build \
-        restorecon -RF "$SYSROOT/boot" || :
+    # podman exec repo-build \
+    #     restorecon -RF "$SYSROOT/boot" || :
 
-    chroot "/.repo/deployments/$deployment" /usr/bin/setfiles -F -T "$(nproc)" \
-        /etc/selinux/targeted/contexts/files/file_contexts / 2>/dev/null
+    chroot "$SYSROOT/.repo/deployments/$deployment" /usr/bin/env "PATH=/usr/bin" \
+        setfiles -F -T"$(nproc)" \
+        /etc/selinux/targeted/contexts/files/file_contexts / || :
 }
 
 activate_dep() {
@@ -358,7 +360,7 @@ dep() {
     fi
     podman start repo-build
     if [[ "$replace" == "1" ]]; then
-        podman exec repo-build dnf install -y cpio rsync
+        podman exec repo-build dnf install -y cpio policycoreutils
     fi
     if [[ "$update" == "1" && "$replace" == "0" ]]; then
         podman exec repo-build dnf check-upgrade --refresh -y
