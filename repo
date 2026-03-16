@@ -44,6 +44,7 @@ dnf_install() {
         rm /tmp/${pkg_split[0]}*.rpm" || { rm -rf "$SYSROOT/.repo/store/$pkg"; exit 1; }
     cd "$SYSROOT/.repo/store/$pkg" &&
         split_scriptlets "$(cat scripts)"
+    touch "$SYSROOT/.repo/store/$pkg/.done"
 }
 
 split_scriptlets() {
@@ -88,6 +89,16 @@ exists_or_install() {
     fi
 }
 
+ensure_installed() {
+    local store_pkgs="$1"
+    local pkg="$2"
+
+    if [[ ! "$store_pkgs" =~ "$pkg" ]]; then
+        printf "%s was not properly installed. Exiting...\n" "$pkg"
+        exit 255
+    fi
+}
+
 run_package_scripts() {
     local deployment="$1"
     local pkg="$2"
@@ -110,7 +121,7 @@ run_package_scripts() {
         esac
         cp "$script" "$SYSROOT/.repo/deployments/$deployment/$script"
         podman exec repo-build \
-            chroot "/.repo/deployments/$deployment" /usr/bin/bash /$script $arg1
+            chroot "/.repo/deployments/$deployment" /usr/bin/bash "/$script" "$arg1"
         rm "$SYSROOT/.repo/deployments/$deployment/$script"
     done
 }
@@ -158,7 +169,7 @@ create_deployment() {
     mount --bind /sys/firmware/efi/efivars "$SYSROOT/.repo/deployments/$next_dep/sys/firmware/efi/efivars/"
 
     export next_dep
-    printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I {} \
+    printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I{} \
         bash -c 'install_package "$next_dep" "$@"' _ {} || :
 
     podman exec repo-build \
@@ -174,7 +185,7 @@ create_deployment() {
     podman exec repo-build \
         cp /scripts/post.sh "/.repo/deployments/$next_dep/post.sh"
 
-    printf "%s" "$dnf_transaction" | xargs -I {} \
+    printf "%s" "$dnf_transaction" | xargs -I{} \
         bash -c 'run_package_scripts "$next_dep" "$@"' _ {} || :
 
     printf "Running post script...\n"
@@ -197,7 +208,7 @@ system_config() {
 
     printf "Syncing system config..."
     find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
-    find "$SYSROOT/etc" -newermt @0 2>/dev/null | xargs -I {} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/"
+    find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/"
 
     cp -rfa --parents "$SYSROOT/etc/fstab" "$SYSROOT/etc/crypttab" "$SYSROOT/etc/locale.conf" \
         "$SYSROOT/etc/localtime" "$SYSROOT/etc/adjtime" "$SYSROOT/etc/sudoers.d" \
@@ -380,7 +391,7 @@ dep() {
     pkg_list="$(get_pkg_list "$SYSROOT/etc/repo/list.pkgs")"
     declare store_pkgs
     store_pkgs="$(podman exec repo-build \
-        find /.repo/store -mindepth 1 -maxdepth 1)"
+        find /.repo/store -mindepth 1 -maxdepth 2 -type f -name ".done")"
     export store_pkgs
     export SYSROOT
     export -f exists_or_install
@@ -396,6 +407,12 @@ dep() {
     export -n dnf_download
     export -n dnf_install
     export -n split_scriptlets
+
+    export -f ensure_installed
+    printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I{} \
+        bash -c 'ensure_installed "$store_pkgs" "$@"' _ {} || \
+        { podman stop -t 2 repo-build &>/dev/null; exit 1; }
+    export -n ensure_installed
 
     if [[ "$create" == "1" ]]; then
         export SYSROOT
