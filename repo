@@ -82,7 +82,7 @@ exists_or_install() {
         export SYSROOT
         export -f split_scriptlets
         dnf_download "$pkg"
-        dnf_install "$pkg"
+        dnf_install "$pkg" || exit 1
         export -n SYSROOT
         export -n split_scriptlets
     fi
