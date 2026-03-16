@@ -1,4 +1,3 @@
-sudo
 # adw-gtk3-theme
 # adwaita-fonts-all
 bash
@@ -48,8 +47,10 @@ rsync
 # sane-backends
 # sane-backends-drivers-cameras
 # sane-backends-drivers-scanners
+selinux-policy-targeted
 sdubby
 skopeo
+sudo
 systemd
 systemd-boot-unsigned
 systemd-ukify

@@ -183,11 +183,13 @@ create_deployment() {
             chroot "/.repo/deployments/$next_dep" /usr/bin/bash /post.sh
     fi
 
-    umount -Rf "$SYSROOT/.repo/deployments/$next_dep/"*
-
     system_config "$next_dep"
 
     boot_files "$next_dep"
+
+    selinux_policy "$next_dep"
+
+    umount -Rf "$SYSROOT/.repo/deployments/$next_dep/"*
 }
 
 system_config() {
@@ -277,6 +279,17 @@ install_package() {
         rsync -aHlx "/.repo/store/$pkg/etc/" "/.repo/deployments/$deployment/etc/" &>/dev/null
 }
 
+selinux_policy() {
+    local deployment="$1"
+
+    printf "Relabeling deployment %s...\n" "$deployment"
+    restorecon -RF "$SYSROOT/boot"
+
+    podman exec repo-build \
+        chroot "/.repo/deployments/$deployment" /usr/bin/setfiles -F -T "$(nproc)" \
+        /etc/selinux/targeted/contexts/files/file_contexts / 2>/dev/null
+}
+
 activate_dep() {
     local deployment="$1"
     local cur_dep
@@ -345,8 +358,8 @@ dep() {
 
     if [[ "$replace" == "1" ]]; then
         podman create --name repo-build --replace -ti \
-            --volume "$SYSROOT/.repo":/.repo \
-            --volume "$SYSROOT/etc/repo/scripts":/scripts \
+            --volume "$SYSROOT/.repo":/.repo:Z \
+            --volume "$SYSROOT/etc/repo/scripts":/scripts:Z \
             "$CONTAINER_IMAGE"
     fi
     podman start repo-build
