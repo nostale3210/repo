@@ -225,6 +225,36 @@ boot_files() {
     cat "$SYSROOT/etc/repo/boot.conf" | sed "s/INSERT_DEPLOYMENT/$deployment/g" > "$SYSROOT/boot/loader/entries/$deployment.conf"
 }
 
+install_repo() {
+    local deployment="$1"
+    podman create --replace --pull newer --name repo-tmp ghcr.io/nostale3210/repo-utils:latest
+    podman cp tmp:/app/repo "$SYSROOT/.repo/deployments/$deployment/usr/bin/repo"
+    podman cp tmp:/app/move-mount "$SYSROOT/.repo/deployments/$deployment/usr/bin/move-mount"
+    podman cp tmp:/app/init/90repo "$SYSROOT/.repo/deployments/$deployment/usr/lib/dracut/modules.d/90repo"
+    podman cp tmp:/app/init/repo-boot.service "$SYSROOT/.repo/deployments/$deployment/usr/lib/systemd/system/repo-boot.service"
+    podman cp tmp:/app/init/repo-boot.sh "$SYSROOT/.repo/deployments/$deployment/usr/libexec/repo-boot.sh"
+    chmod +x "$SYSROOT/.repo/deployments/$deployment/usr/libexec/repo-boot.sh"
+    podman rm repo-tmp
+}
+
+init_repo() {
+    podman create --replace --pull newer --name repo-tmp ghcr.io/nostale3210/repo-utils:latest
+
+    podman cp tmp:/app/repo "$SYSROOT/usr/bin/repo"
+    podman cp tmp:/app/move-mount "$SYSROOT/usr/bin/move-mount"
+    podman cp tmp:/app/init/90repo "$SYSROOT/usr/lib/dracut/modules.d/90repo"
+    podman cp tmp:/app/init/repo-boot.service "$SYSROOT/usr/lib/systemd/system/repo-boot.service"
+    podman cp tmp:/app/init/repo-boot.sh "$SYSROOT/usr/libexec/repo-boot.sh"
+    chmod +x "$SYSROOT/usr/libexec/repo-boot.sh"
+
+    mkdir -p "$SYSROOT/.repo/"{store,deployments/0}
+    mkdir -p "$SYSROOT/etc/repo"
+    podman cp tmp:/app/list.pkgs "$SYSROOT/etc/repo/list.pkgs"
+    podman cp tmp:/app/scripts "$SYSROOT/etc/repo/scripts"
+
+    podman rm repo-tmp
+}
+
 install_package() {
     local deployment="$1"
     local pkg="$2"
@@ -403,5 +433,9 @@ case "$SUBCMD" in
     "activate")
         printf "Activating deployment %s" "$2"
         activate_dep "$2"
+        ;;
+    "init")
+        printf "Initiating repo on the host system...\n"
+        init_repo
         ;;
 esac
