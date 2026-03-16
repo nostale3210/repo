@@ -37,14 +37,14 @@ dnf_download() {
 dnf_install() {
     local pkg="$1"
     IFS="@" read -ra pkg_split <<< "$pkg"
-    podman exec repo-build bash -c "mkdir -p /.repo/store/$pkg
-        cd /.repo/store/$pkg
-        rpm -qp --scripts /tmp/${pkg_split[0]}*.rpm > scripts
-        rpm2cpio /tmp/${pkg_split[0]}*.rpm | cpio -idm || exit 1
-        rm /tmp/${pkg_split[0]}*.rpm || exit 1" || { rm -rf "$SYSROOT/.repo/store/$pkg"; exit 1; }
+    podman exec repo-build bash -c "mkdir -p /.repo/store/$pkg &&
+        cd /.repo/store/$pkg &&
+        rpm -qp --scripts /tmp/${pkg_split[0]}*.rpm > scripts &&
+        rpm2cpio /tmp/${pkg_split[0]}*.rpm | cpio -idm &&
+        rm /tmp/${pkg_split[0]}*.rpm &&
+        touch /.repo/store/$pkg/.done"
     cd "$SYSROOT/.repo/store/$pkg" &&
         split_scriptlets "$(cat scripts)"
-    touch "$SYSROOT/.repo/store/$pkg/.done"
 }
 
 split_scriptlets() {
@@ -207,9 +207,12 @@ system_config() {
         "$SYSROOT/etc/sudoers" "$SYSROOT/etc/ald" \
         "$SYSROOT/.repo/deployments/$deployment/" 2>/dev/null || :
 
-    sort "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployment/etc/passwd" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
-    sort "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployment/etc/shadow" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
-    sort "$SYSROOT/etc/group" "$SYSROOT/.repo/deployments/$deployment/etc/group" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/group"
+    sort "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployment/etc/passwd" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp" &&
+        mv "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
+    sort "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployment/etc/shadow" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/shadow.tmp" &&
+        mv "$SYSROOT/.repo/deployments/$deployment/etc/shadow.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
+    sort "$SYSROOT/etc/group" "$SYSROOT/.repo/deployments/$deployment/etc/group" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/group.tmp" &&
+        mv "$SYSROOT/.repo/deployments/$deployment/etc/group.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/group"
 }
 
 boot_files() {
