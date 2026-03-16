@@ -18,7 +18,8 @@ install() {
     inst_multiple /usr/libexec/repo-boot.sh \
         "$systemdsystemunitdir"/repo-boot.service \
         repo \
-        move-mount
+        move-mount \
+        mountpoint
 
     $SYSTEMCTL -q --root "$initdir" enable repo-boot.service
 }
