@@ -41,7 +41,7 @@ dnf_install() {
         cd /.repo/store/$pkg
         rpm -qp --scripts /tmp/${pkg_split[0]}*.rpm > scripts
         rpm2cpio /tmp/${pkg_split[0]}*.rpm | cpio -idm || exit 1
-        rm /tmp/${pkg_split[0]}*.rpm" || { rm -rf "$SYSROOT/.repo/store/$pkg"; exit 1; }
+        rm /tmp/${pkg_split[0]}*.rpm || exit 1" || { rm -rf "$SYSROOT/.repo/store/$pkg"; exit 1; }
     cd "$SYSROOT/.repo/store/$pkg" &&
         split_scriptlets "$(cat scripts)"
     touch "$SYSROOT/.repo/store/$pkg/.done"
@@ -74,29 +74,21 @@ split_scriptlets() {
 }
 
 exists_or_install() {
-    local store_pkgs="$1"
-    local pkg="$2"
+    local pkg="$1"
 
-    if [[ "$store_pkgs" =~ "$pkg" ]]; then
-        printf "%s is already in the store\n" "$pkg"
-    else
-        export SYSROOT
-        export -f split_scriptlets
-        dnf_download "$pkg"
-        dnf_install "$pkg" || exit 1
-        export -n SYSROOT
-        export -n split_scriptlets
-    fi
-}
-
-ensure_installed() {
-    local store_pkgs="$1"
-    local pkg="$2"
-
-    if [[ ! "$store_pkgs" =~ "$pkg" ]]; then
-        printf "%s was not properly installed. Exiting...\n" "$pkg"
-        exit 255
-    fi
+    export SYSROOT
+    export -f split_scriptlets
+    while :; do
+        if [[ -f "$SYSROOT/.repo/store/$pkg/.done" ]]; then
+            printf "%s found in store\n" "$pkg"
+            break
+        else
+            dnf_download "$pkg"
+            dnf_install "$pkg"
+        fi
+    done
+    export -n SYSROOT
+    export -n split_scriptlets
 }
 
 run_package_scripts() {
@@ -130,7 +122,7 @@ populate_store() {
     local dnf_transaction="$1"
     local store_pkgs="$2"
     printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I{} \
-        bash -c 'exists_or_install "$store_pkgs" "$@"' _ {}
+        bash -c 'exists_or_install "$@"' _ {}
 }
 
 get_deployments() {
@@ -391,7 +383,7 @@ dep() {
     pkg_list="$(get_pkg_list "$SYSROOT/etc/repo/list.pkgs")"
     declare store_pkgs
     store_pkgs="$(podman exec repo-build \
-        find /.repo/store -mindepth 1 -maxdepth 2 -type f -name ".done")"
+        find /.repo/store -mindepth 1 -maxdepth 1)"
     export store_pkgs
     export SYSROOT
     export -f exists_or_install
@@ -407,12 +399,6 @@ dep() {
     export -n dnf_download
     export -n dnf_install
     export -n split_scriptlets
-
-    export -f ensure_installed
-    printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I{} \
-        bash -c 'ensure_installed "$store_pkgs" "$@"' _ {} || \
-        { podman stop -t 2 repo-build &>/dev/null; exit 1; }
-    export -n ensure_installed
 
     if [[ "$create" == "1" ]]; then
         export SYSROOT
