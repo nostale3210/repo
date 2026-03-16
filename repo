@@ -292,7 +292,7 @@ activate_dep() {
     cur_dep="$(cat "$SYSROOT/usr/.repo")"
 
     if [[ "$deployment" == "$cur_dep" ]]; then
-        printf "%s is already activated. Exiting..." "$deployment"
+        printf "%s is already activated. Exiting...\n" "$deployment"
         exit 0
     fi
 
@@ -440,7 +440,7 @@ case "$SUBCMD" in
         find_orphans "rm"
         ;;
     "activate")
-        printf "Activating deployment %s" "$2"
+        printf "Activating deployment %s\n" "$2"
         activate_dep "$2"
         ;;
     "init")
