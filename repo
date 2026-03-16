@@ -112,8 +112,7 @@ run_package_scripts() {
                 ;;
         esac
         cp "$script" "$SYSROOT/.repo/deployments/$deployment/$script"
-        podman exec repo-build \
-            chroot "/.repo/deployments/$deployment" /usr/bin/bash "/$script" "$arg1"
+        chroot "$SYSROOT/.repo/deployments/$deployment" /usr/bin/bash "/$script" "$arg1"
         rm "$SYSROOT/.repo/deployments/$deployment/$script"
     done
 }
@@ -126,8 +125,7 @@ populate_store() {
 }
 
 get_deployments() {
-    printf "%s" "$(podman exec repo-build \
-        find /.repo/deployments -mindepth 1 -maxdepth 1 -regex ".*/[0-9]+" | \
+    printf "%s" "$(find "$SYSROOT/.repo/deployments" -mindepth 1 -maxdepth 1 -regex ".*/[0-9]+" | \
         awk -F"/" '{print $NF}')"
 }
 
@@ -146,8 +144,8 @@ create_deployment() {
     local next_dep
     dnf_transaction="$1"
     next_dep="$(get_next_deployment)"
-    podman exec repo-build mkdir -p "/.repo/deployments/$next_dep/usr/lib"
-    podman exec repo-build mkdir -p "/.repo/deployments/$next_dep/etc"
+    mkdir -p "$SYSROOT/.repo/deployments/$next_dep/usr/lib"
+    mkdir -p "$SYSROOT/.repo/deployments/$next_dep/etc"
     printf "%s" "$dnf_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
     printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
     mkdir "$SYSROOT/boot/$next_dep"
@@ -164,26 +162,19 @@ create_deployment() {
     printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I{} \
         bash -c 'install_package "$next_dep" "$@"' _ {} || :
 
-    podman exec repo-build \
-        ln -s usr/lib "/.repo/deployments/$next_dep/lib"
-    podman exec repo-build \
-        ln -s usr/lib64 "/.repo/deployments/$next_dep/lib64"
-    podman exec repo-build \
-        ln -s usr/bin "/.repo/deployments/$next_dep/bin"
-    podman exec repo-build \
-        ln -s usr/sbin "/.repo/deployments/$next_dep/sbin"
-    podman exec repo-build \
-        ln -s bin "/.repo/deployments/$next_dep/usr/sbin"
-    podman exec repo-build \
-        cp /scripts/post.sh "/.repo/deployments/$next_dep/post.sh"
+    ln -s usr/lib "$SYSROOT/.repo/deployments/$next_dep/lib"
+    ln -s usr/lib64 "$SYSROOT/.repo/deployments/$next_dep/lib64"
+    ln -s usr/bin "$SYSROOT/.repo/deployments/$next_dep/bin"
+    ln -s usr/sbin "$SYSROOT/.repo/deployments/$next_dep/sbin"
+    ln -s bin "$SYSROOT/.repo/deployments/$next_dep/usr/sbin"
+    cp "$SYSROOT/etc/repo/scripts/post.sh" "/.repo/deployments/$next_dep/post.sh"
 
     printf "%s" "$dnf_transaction" | xargs -I{} \
         bash -c 'run_package_scripts "$next_dep" "$@"' _ {} || :
 
     printf "Running post script...\n"
     if [[ -f "$SYSROOT/etc/repo/scripts/post.sh" ]]; then
-        podman exec repo-build \
-            chroot "/.repo/deployments/$next_dep" /usr/bin/bash /post.sh
+        chroot "$SYSROOT/.repo/deployments/$next_dep" /usr/bin/bash /post.sh
     fi
 
     system_config "$next_dep"
@@ -200,7 +191,7 @@ system_config() {
 
     printf "Syncing system config..."
     find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
-    find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/"
+    find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/" || :
 
     cp -rfa --parents "$SYSROOT/etc/fstab" "$SYSROOT/etc/crypttab" "$SYSROOT/etc/locale.conf" \
         "$SYSROOT/etc/localtime" "$SYSROOT/etc/adjtime" "$SYSROOT/etc/sudoers.d" \
@@ -209,7 +200,7 @@ system_config() {
         "$SYSROOT/etc/pki" "$SYSROOT/etc/firewalld" "$SYSROOT/etc/environment" \
         "$SYSROOT/etc/hostname" "$SYSROOT/etc/X11/xorg.conf.d/00-keyboard.conf" \
         "$SYSROOT/etc/sudoers" "$SYSROOT/etc/ald" \
-        "$SYSROOT/.repo/deployments/$deployment/" 2>/dev/null
+        "$SYSROOT/.repo/deployments/$deployment/" 2>/dev/null || :
 
     sort "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployments/etc/passwd" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
     sort "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployments/etc/shadow" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
@@ -286,10 +277,10 @@ selinux_policy() {
     local deployment="$1"
 
     printf "Relabeling deployment %s...\n" "$deployment"
-    restorecon -RF "$SYSROOT/boot"
-
     podman exec repo-build \
-        chroot "/.repo/deployments/$deployment" /usr/bin/setfiles -F -T "$(nproc)" \
+        restorecon -RF "$SYSROOT/boot" || :
+
+    chroot "/.repo/deployments/$deployment" /usr/bin/setfiles -F -T "$(nproc)" \
         /etc/selinux/targeted/contexts/files/file_contexts / 2>/dev/null
 }
 
@@ -391,7 +382,7 @@ dep() {
     export -f dnf_install
     export -f split_scriptlets
     declare dnf_transaction
-    dnf_transaction="$(get_dnf_transaction "/empty" pkg_list)"
+    dnf_transaction="$(get_dnf_transaction "/empty" pkg_list | tac)"
     populate_store "$dnf_transaction" "$store_pkgs"
     export -n SYSROOT
     export -n store_pkgs
