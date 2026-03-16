@@ -78,7 +78,7 @@ exists_or_install() {
 
     export SYSROOT
     export -f split_scriptlets
-    while :; do
+    for _ in {1..3}; do
         if [[ -f "$SYSROOT/.repo/store/$pkg/.done" ]]; then
             printf "%s found in store\n" "$pkg"
             break
