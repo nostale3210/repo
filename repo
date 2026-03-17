@@ -171,6 +171,7 @@ create_deployment() {
     ln -s bin "$SYSROOT/.repo/deployments/$next_dep/usr/sbin"
     cp "$SYSROOT/etc/repo/scripts/post.sh" "$SYSROOT/.repo/deployments/$next_dep/post.sh"
 
+    mkdir -p "$SYSROOT/.repo/deployments/$next_dep/var/"{cache,lib,log}
     printf "%s" "$dnf_transaction" | xargs -I{} \
         bash -c 'run_package_scripts "$next_dep" "$@"' _ {} || :
 
@@ -194,7 +195,7 @@ create_deployment() {
 
 system_config() {
     local deployment="$1"
-    local drop "$2"
+    local drop="$2"
 
     printf "Syncing system config...\n"
     find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
