@@ -311,6 +311,7 @@ activate_dep() {
     fi
 
     if mountpoint -q "$SYSROOT/usr"; then
+        mount --make-private "$SYSROOT/"
         mount --make-private "$SYSROOT/usr"
         mount -t overlay usr-root --make-private \
             -o lowerdir="$SYSROOT/.repo/empty:$SYSROOT/.repo/deployments/$deployment/usr" \
