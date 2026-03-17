@@ -1,3 +1,8 @@
+@standard
+@networkmanager-submodules
+@multimedia
+@hardware-support
+@core
 # adw-gtk3-theme
 # adwaita-fonts-all
 bash
