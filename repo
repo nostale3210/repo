@@ -3,6 +3,7 @@ set -oue pipefail
 
 CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
 SUBCMD="${1-none}"
+SUBARG="${2-none}"
 
 if [[ "$*" == *"--rootd"* ]]; then
     SYSROOT="${*: -1}"
@@ -141,9 +142,9 @@ get_next_deployment() {
 }
 
 create_deployment() {
-    local dnf_transaction
+    local dnf_transaction="$1"
+    local drop="$2"
     local next_dep
-    dnf_transaction="$1"
     next_dep="$(get_next_deployment)"
     mkdir -p "$SYSROOT/.repo/deployments/$next_dep/usr/lib"
     mkdir -p "$SYSROOT/.repo/deployments/$next_dep/etc"
@@ -182,7 +183,7 @@ create_deployment() {
             /usr/bin/env "PATH=/usr/bin" bash /post.sh
     fi
 
-    system_config "$next_dep"
+    system_config "$next_dep" "$drop"
 
     boot_files "$next_dep"
 
@@ -193,10 +194,14 @@ create_deployment() {
 
 system_config() {
     local deployment="$1"
+    local drop "$2"
 
     printf "Syncing system config...\n"
     find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
-    find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/" || :
+
+    if [[ "$drop" != "drop" ]]; then
+        find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/" || :
+    fi
 
     cp -rfa --parents "$SYSROOT/etc/fstab" "$SYSROOT/etc/crypttab" "$SYSROOT/etc/locale.conf" \
         "$SYSROOT/etc/localtime" "$SYSROOT/etc/adjtime" "$SYSROOT/etc/sudoers.d" \
@@ -354,6 +359,7 @@ dep() {
     local replace="$1"
     local update="$2"
     local create="$3"
+    local drop="$4"
 
     if [[ "$replace" == "1" ]]; then
         podman create --name repo-build --replace -ti \
@@ -404,7 +410,7 @@ dep() {
         export -f install_package
         export -f split_scriptlets
         export -f run_package_scripts
-        create_deployment "$dnf_transaction"
+        create_deployment "$dnf_transaction" "$drop"
         export -n SYSROOT
         export -n create_deployment
         export -n get_next_deployment
@@ -418,13 +424,13 @@ dep() {
 }
 
 case "$SUBCMD" in
-    "error")
+    "none")
         printf "No subcommand was specified!\n"
         exit 1
         ;;
     "dep")
         printf "Creating new deployment...\n"
-        dep "0" "0" "1"
+        dep "0" "0" "1" "$SUBARG"
         ;;
     "update")
         printf "Updating store and creating new deployment...\n"
@@ -443,8 +449,8 @@ case "$SUBCMD" in
         find_orphans "rm"
         ;;
     "activate")
-        printf "Activating deployment %s\n" "$2"
-        activate_dep "$2"
+        printf "Activating deployment %s\n" "$SUBARG"
+        activate_dep "$SUBARG"
         ;;
     "init")
         printf "Initiating repo on the host system...\n"
