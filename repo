@@ -441,11 +441,11 @@ case "$SUBCMD" in
         ;;
     "update")
         printf "Updating store and creating new deployment...\n"
-        dep "0" "1" "1"
+        dep "0" "1" "1" "$SUBARG"
         ;;
     "recreate")
         printf "Recreating build container and rebuilding store...\n"
-        dep "1" "0" "0"
+        dep "1" "0" "0" "$SUBARG"
         ;;
     "get-orphans")
         printf "Finding orphaned paths in the store...\n"
