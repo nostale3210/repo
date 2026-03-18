@@ -3,6 +3,10 @@
 @multimedia
 @hardware-support
 @core
+lua
+lua-posix
+lua-libs
+rpm-build
 # adw-gtk3-theme
 # adwaita-fonts-all
 bash

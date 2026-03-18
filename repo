@@ -50,29 +50,29 @@ dnf_install() {
 
 split_scriptlets() {
     local scriptlets="$1"
-    awk '
-        BEGIN {
-            header_re = "^[[:alnum:]_+-]+[[:space:]]+scriptlet"
-            cur = ""
-            fname = ""
-        }
-        # If line matches header like "postinstall scriptlet (using /bin/sh):"
-        $0 ~ header_re {
-            # extract first word as section name
-            split($0, a, " ")
-            cur = a[1]
-            fname = cur ".sh"
-            print "#!/bin/sh" > fname
+    awk '{
+        if ($2=="scriptlet" && $3=="(using") {
+            if (out) close(out)
+            type=tolower($1)
+            interp=$4
+            sub(/\).*$/,"",interp)
+            gsub(/[<>]/,"",interp)
+            gsub(/[^A-Za-z0-9_+.-]/,"",interp)
+            # normalize interpreter
+            if (interp=="/bin/sh" || interp=="bin/sh" || interp=="sh" || interp=="binsh") interp="sh"
+            if (interp=="lua") interp="rpmlua"
+            suf=(interp ".sh")
+            order = (type=="pretrans") ? 1 :
+            (type=="preinstall" || type=="preinst") ? 2 :
+            (type=="postinstall" || type=="postinst") ? 3 :
+            (type=="posttrans") ? 4 :
+            (type=="postuninstall" || type=="postuninst") ? 5 : 99
+            out = order "_" type "." suf
             next
         }
-        # If within a section, print lines into current file
-        {
-            if (cur != "") {
-                print $0 >> fname
-            }
-        }
-    ' <<< "$scriptlets"
-}
+        if (out) print > out
+        }' <<< "$scriptlets"
+    }
 
 exists_or_install() {
     local pkg="$1"
@@ -99,22 +99,27 @@ run_package_scripts() {
     cd "$SYSROOT/.repo/store/$pkg"
     for script in *.sh; do
         case "$script" in
-            preinstall.sh)
+            *pretrans*)
                 arg1=1
                 ;;
-            postinstall.sh)
+            *preinstall*)
                 arg1=1
                 ;;
-            posttrans.sh)
+            *postinstall*)
+                arg1=1
+                ;;
+            *posttrans*)
                 arg1=2
                 ;;
             *)
                 continue
                 ;;
         esac
+        local interpreter
+        interpreter="$(cut -d'.' -f2 <<< "$script")"
         cp "$script" "$SYSROOT/.repo/deployments/$deployment/$script"
         chroot "$SYSROOT/.repo/deployments/$deployment" \
-            /usr/bin/env PATH="/usr/bin" bash "/$script" "$arg1"
+            /usr/bin/env PATH="/usr/bin" "$interpreter" "/$script" "$arg1"
         rm "$SYSROOT/.repo/deployments/$deployment/$script"
     done
 }
