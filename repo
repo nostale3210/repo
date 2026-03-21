@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -oue pipefail
+set -oueE pipefail
 
 CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
 SUBCMD="${1-none}"
@@ -26,109 +26,42 @@ get_dnf_transaction() {
     transaction="$(podman exec repo-build \
         dnf install --assumeno --use-host-config --installroot "$mockdir" "${pkg_array[@]}")" || :
     transaction="$(grep "^\s[a-zA-Z0-9].*" <<< "$transaction" | grep -v "^\sInstalling.*")"
-    awk '{print $1"@"$3"."$2}' <<< "$transaction"
+    awk '$4 ~ /.+/' <<< "$transaction" | awk '{print $1"@"$3"."$2}'
 }
 
 dnf_download() {
     local pkg="$1"
-    pkg="$(sed "s/@/-/" <<< "$pkg")"
-    podman exec repo-build dnf download --destdir /tmp "$pkg" || :
+    local pkg_name="$2"
+    podman exec repo-build bash -c "dnf download --destdir /tmp ${pkg//@/-}
+    mv -f /tmp/$pkg_name*.rpm /.repo/store/$pkg.rpm"
 }
-
-dnf_install() {
-    local pkg="$1"
-    IFS="@" read -ra pkg_split <<< "$pkg"
-    podman exec repo-build bash -c "mkdir -p /.repo/store/$pkg &&
-        cd /.repo/store/$pkg &&
-        rpm -qp --scripts /tmp/${pkg_split[0]}*.rpm > scripts &&
-        rpm2cpio /tmp/${pkg_split[0]}*.rpm | cpio -idm &&
-        rm /tmp/${pkg_split[0]}*.rpm &&
-        touch /.repo/store/$pkg/.done"
-    cd "$SYSROOT/.repo/store/$pkg" &&
-        split_scriptlets "$(cat scripts)"
-}
-
-split_scriptlets() {
-    local scriptlets="$1"
-    awk '{
-        if ($2=="scriptlet" && $3=="(using") {
-            if (out) close(out)
-            type=tolower($1)
-            interp=$4
-            sub(/\).*$/,"",interp)
-            gsub(/[<>]/,"",interp)
-            gsub(/[^A-Za-z0-9_+.-]/,"",interp)
-            # normalize interpreter
-            if (interp=="/bin/sh" || interp=="bin/sh" || interp=="sh" || interp=="binsh") interp="sh"
-            if (interp=="lua") interp="rpmlua"
-            suf=(interp ".sh")
-            order = (type=="pretrans") ? 1 :
-            (type=="preinstall" || type=="preinst") ? 2 :
-            (type=="postinstall" || type=="postinst") ? 3 :
-            (type=="posttrans") ? 4 :
-            (type=="postuninstall" || type=="postuninst") ? 5 : 99
-            out = order "_" type "." suf
-            next
-        }
-        if (out) print > out
-        }' <<< "$scriptlets"
-    }
 
 exists_or_install() {
     local pkg="$1"
+    IFS="@" read -ra pkg_split <<< "$pkg"
 
     export SYSROOT
-    export -f split_scriptlets
-    for _ in {1..3}; do
-        if [[ -f "$SYSROOT/.repo/store/$pkg/.done" ]]; then
+    for i in {1..3}; do
+        if [[ -f "$SYSROOT/.repo/store/$pkg.rpm" ]]; then
             printf "%s found in store\n" "$pkg"
             break
         else
-            dnf_download "$pkg"
-            dnf_install "$pkg"
+            sleep "$(((i-1)*3))"
+            dnf_download "$pkg" "${pkg_split[0]}"
+        fi
+        if [[ "$i" == "3" && ! "$pkg" =~ ^[[:upper:]] ]]; then
+            printf "%s (%s) couldn't be downloaded\n" "$pkg" "${pkg_split[0]}"
+            exit 255;
         fi
     done
     export -n SYSROOT
-    export -n split_scriptlets
-}
-
-run_package_scripts() {
-    local deployment="$1"
-    local pkg="$2"
-    printf "Running %s scripts...\n" "$pkg"
-    cd "$SYSROOT/.repo/store/$pkg"
-    for script in *.sh; do
-        case "$script" in
-            *pretrans*)
-                arg1=1
-                ;;
-            *preinstall*)
-                arg1=1
-                ;;
-            *postinstall*)
-                arg1=1
-                ;;
-            *posttrans*)
-                arg1=2
-                ;;
-            *)
-                continue
-                ;;
-        esac
-        local interpreter
-        interpreter="$(cut -d'.' -f2 <<< "$script")"
-        cp "$script" "$SYSROOT/.repo/deployments/$deployment/$script"
-        chroot "$SYSROOT/.repo/deployments/$deployment" \
-            /usr/bin/env PATH="/usr/bin" "$interpreter" "/$script" "$arg1"
-        rm "$SYSROOT/.repo/deployments/$deployment/$script"
-    done
 }
 
 populate_store() {
     local dnf_transaction="$1"
-    local store_pkgs="$2"
     printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I{} \
-        bash -c 'exists_or_install "$@"' _ {}
+        bash -c 'exists_or_install "$@"' _ {} ||
+        { printf "Couldn't install some packages. Exiting...\n"; exit 1; }
 }
 
 get_deployments() {
@@ -149,13 +82,52 @@ get_next_deployment() {
 create_deployment() {
     local dnf_transaction="$1"
     local drop="$2"
+    local prev_dep
     local next_dep
     next_dep="$(get_next_deployment)"
-    mkdir -p "$SYSROOT/.repo/deployments/$next_dep/usr/lib"
-    mkdir -p "$SYSROOT/.repo/deployments/$next_dep/etc"
-    printf "%s" "$dnf_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
-    printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
-    mkdir "$SYSROOT/boot/$next_dep"
+    prev_dep="$((next_dep-1))"
+
+    trap 'cleanup_dep "$next_dep"' INT TERM ERR
+
+    printf "Creating deployment %s...\n" "$next_dep"
+
+    podman exec repo-build bash -c "mkdir -p /tmp/$next_dep/{usr,etc}"
+
+    export next_dep
+    install_package "$next_dep" "$dnf_transaction" :
+
+    podman exec repo-build cp /scripts/post.sh "/tmp/$next_dep/post.sh"
+
+    install_repo "$next_dep"
+
+    if [[ "$next_dep" == "0" ]]; then
+        mv -f "/tmp/$next_dep" "$SYSROOT/.repo/deployments/$next_dep"
+    else
+        mkdir -p "$SYSROOT/.repo/deployments/$next_dep/"{usr,etc}
+        printf "Hardlinking previous deployment...\n"
+        rsync -aHlx --link-dest="../../$prev_dep/usr/" "$SYSROOT/.repo/deployments/$prev_dep/usr/" "$SYSROOT/.repo/deployments/$next_dep/usr/"
+        printf "Syncing previous config...\n"
+        rsync -aHlx "$SYSROOT/.repo/deployments/$prev_dep/etc/" "$SYSROOT/.repo/deployments/$next_dep/etc/"
+        printf "Syncing next directory skeleton...\n"
+        rsync -ac -f"+ */" -f"- *" --delete "/tmp/$next_dep/" "$SYSROOT/.repo/deployments/$next_dep/"
+        printf "Syncing next deployment to disk...\n"
+        find "/tmp/$next_dep" -not -type d -printf "%s\t%p\n" |
+            sort -nr | cut -f2- | sed "s/^\(\/tmp\/$next_dep\)/\1\/./g" |
+            grep -e "^/tmp/$next_dep/\./usr" -e "^/tmp/$next_dep/\./etc" \
+            -e "^/tmp/$next_dep/\./bin" -e "^/tmp/$next_dep/\./sbin" \
+            -e "^/tmp/$next_dep/\./lib" -e "^/tmp/$next_dep/\./lib64" |
+            xargs -n5000 -P"$(nproc)" \
+            bash -c 'sysroot="$0" && shift && rsync -aHlcx --delete --relative --ignore-missing-args "$@" "$sysroot/.repo/deployments/$next_dep/"' "$SYSROOT" _
+        printf "Trimming image...\n"
+        local dirty
+        local clean
+        dirty="$(find "$SYSROOT/.repo/deployments/$next_dep/usr" "$SYSROOT/.repo/deployments/$next_dep/etc" | sed "s|^$SYSROOT/.repo/deployments/$next_dep||g" | sort)"
+        clean="$(find "/tmp/$next_dep/usr" "/tmp/$next_dep/etc" | sed "s/^\/tmp\/$next_dep//g" | sort)"
+        comm -23 <(printf "%s" "$dirty") <(printf "%s" "$clean") |
+            sed "s|^|$SYSROOT/.repo/deployments/$next_dep|g" | xargs rm -rf
+    fi
+
+    rm -rf "/tmp/$next_dep"
 
     mkdir -p "$SYSROOT/.repo/deployments/$next_dep/"{dev,proc,run,sys,tmp}
     mount -t proc /proc "$SYSROOT/.repo/deployments/$next_dep/proc/"
@@ -164,23 +136,6 @@ create_deployment() {
     mount --bind /dev "$SYSROOT/.repo/deployments/$next_dep/dev/"
     mount --bind /run "$SYSROOT/.repo/deployments/$next_dep/run/"
     mount --bind /sys/firmware/efi/efivars "$SYSROOT/.repo/deployments/$next_dep/sys/firmware/efi/efivars/"
-
-    export next_dep
-    printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I{} \
-        bash -c 'install_package "$next_dep" "$@"' _ {} || :
-
-    ln -s usr/lib "$SYSROOT/.repo/deployments/$next_dep/lib"
-    ln -s usr/lib64 "$SYSROOT/.repo/deployments/$next_dep/lib64"
-    ln -s usr/bin "$SYSROOT/.repo/deployments/$next_dep/bin"
-    ln -s usr/sbin "$SYSROOT/.repo/deployments/$next_dep/sbin"
-    ln -s bin "$SYSROOT/.repo/deployments/$next_dep/usr/sbin"
-    cp "$SYSROOT/etc/repo/scripts/post.sh" "$SYSROOT/.repo/deployments/$next_dep/post.sh"
-
-    mkdir -p "$SYSROOT/.repo/deployments/$next_dep/var/"{cache,lib,log}
-    printf "%s" "$dnf_transaction" | xargs -I{} \
-        bash -c 'run_package_scripts "$next_dep" "$@"' _ {} || :
-
-    install_repo "$next_dep"
 
     printf "Running post script...\n"
     if [[ -f "$SYSROOT/etc/repo/scripts/post.sh" ]]; then
@@ -191,11 +146,12 @@ create_deployment() {
 
     system_config "$next_dep" "$drop"
 
+    mkdir "$SYSROOT/boot/$next_dep"
     boot_files "$next_dep"
 
     selinux_policy "$next_dep"
 
-    umount -Rf "$SYSROOT/.repo/deployments/$next_dep/"* || :
+    umount -Rfl "$SYSROOT/.repo/deployments/$next_dep/"* || :
 }
 
 system_config() {
@@ -243,12 +199,12 @@ boot_files() {
 install_repo() {
     local deployment="$1"
     podman create --replace --pull newer --name repo-tmp ghcr.io/nostale3210/repo-utils:latest
-    podman cp repo-tmp:/app/repo "$SYSROOT/.repo/deployments/$deployment/usr/bin/repo"
-    podman cp repo-tmp:/app/move-mount "$SYSROOT/.repo/deployments/$deployment/usr/bin/move-mount"
-    podman cp repo-tmp:/app/init/90repo "$SYSROOT/.repo/deployments/$deployment/usr/lib/dracut/modules.d/90repo"
-    podman cp repo-tmp:/app/init/repo-boot.service "$SYSROOT/.repo/deployments/$deployment/usr/lib/systemd/system/repo-boot.service"
-    podman cp repo-tmp:/app/init/repo-boot.sh "$SYSROOT/.repo/deployments/$deployment/usr/libexec/repo-boot.sh"
-    chmod +x "$SYSROOT/.repo/deployments/$deployment/usr/libexec/repo-boot.sh"
+    podman cp repo-tmp:/app/repo "/tmp/$deployment/usr/bin/repo"
+    podman cp repo-tmp:/app/move-mount "/tmp/$deployment/usr/bin/move-mount"
+    podman cp repo-tmp:/app/init/90repo "/tmp/$deployment/usr/lib/dracut/modules.d/90repo"
+    podman cp repo-tmp:/app/init/repo-boot.service "/tmp/$deployment/usr/lib/systemd/system/repo-boot.service"
+    podman cp repo-tmp:/app/init/repo-boot.sh "/tmp/$deployment/usr/libexec/repo-boot.sh"
+    chmod +x "/tmp/$deployment/usr/libexec/repo-boot.sh"
     podman rm repo-tmp
 }
 
@@ -272,20 +228,10 @@ init_repo() {
 
 install_package() {
     local deployment="$1"
-    local pkg="$2"
-    local pkg_dirs
-    local pkg_files
-    printf "Installing %s\n" "$pkg"
-    rsync -aHlx --link-dest="../../../store/$pkg/usr/" \
-        "$SYSROOT/.repo/store/$pkg/usr/" \
-        "$SYSROOT/.repo/deployments/$deployment/usr/" &>/dev/null
-    rsync -aHlx --link-dest="../../../../store/$pkg/lib/" \
-        "$SYSROOT/.repo/store/$pkg/lib/" \
-        "$SYSROOT/.repo/deployments/$deployment/usr/lib/" &>/dev/null
-    rsync -aHlx --link-dest="../../../../store/$pkg/lib64/" \
-        "$SYSROOT/.repo/store/$pkg/lib64/" \
-        "$SYSROOT/.repo/deployments/$deployment/usr/lib64/" &>/dev/null
-    rsync -aHlx "$SYSROOT/.repo/store/$pkg/etc/" "$SYSROOT/.repo/deployments/$deployment/etc/" &>/dev/null
+    local dnf_transaction
+    dnf_transaction="$(sed "s/\(.*\)$/\/.repo\/store\/\1.rpm/" <<< "$2")"
+    read -ra pkg_array <<< "$(tr "\n" " " <<< "$dnf_transaction")"
+    podman exec repo-build dnf install -y --installroot="/tmp/$deployment" "${pkg_array[@]}"
 }
 
 selinux_policy() {
@@ -362,6 +308,27 @@ find_orphans() {
     podman stop -t 2 repo-build &>/dev/null
 }
 
+cleanup_dep() {
+    local deployment="$1"
+    umount -Rfl "$SYSROOT/.repo/deployments/$deployment/"* || :
+    if [[ -f "$SYSROOT/boot/loader/entries/$deployment.conf" ]]; then
+        rm -f "$SYSROOT/boot/loader/entries/$deployment.conf"
+    elif [[ -f "$SYSROOT/boot/EFI/Linux/$deployment.efi" ]]; then
+        rm -f "$SYSROOT/boot/EFI/Linux/$deployment.efi"
+    fi
+    if [[ -d "$SYSROOT/boot/$deployment" ]]; then
+        rm -rf "$SYSROOT/boot/$deployment"
+    fi
+    if [[ -d "$SYSROOT/tmp/$deployment" ]]; then
+        rm -rf "$SYSROOT/tmp/$deployment"
+    fi
+    if [[ -d "$SYSROOT/.repo/deployments/$deployment" ]]; then
+        rm -rf "$SYSROOT/.repo/deployments/$deployment"
+    fi
+    podman stop -t 1 repo-build &>/dev/null
+    printf "Cleaned up deployment %s\n" "$deployment"
+}
+
 dep() {
     local replace="$1"
     local update="$2"
@@ -372,11 +339,12 @@ dep() {
         podman create --name repo-build --replace -ti \
             --volume "$SYSROOT/.repo":/.repo:Z \
             --volume "$SYSROOT/etc/repo/scripts":/scripts:Z \
+            --volume /tmp:/tmp:Z \
             "$CONTAINER_IMAGE"
     fi
     podman start repo-build
     if [[ "$replace" == "1" ]]; then
-        podman exec repo-build dnf install -y cpio policycoreutils
+        podman exec repo-build dnf install -y dnf5-plugins
     fi
     if [[ "$update" == "1" && "$replace" == "0" ]]; then
         podman exec repo-build dnf check-upgrade --refresh -y
@@ -390,24 +358,15 @@ dep() {
 
     declare pkg_list
     pkg_list="$(get_pkg_list "$SYSROOT/etc/repo/list.pkgs")"
-    declare store_pkgs
-    store_pkgs="$(podman exec repo-build \
-        find /.repo/store -mindepth 1 -maxdepth 1)"
-    export store_pkgs
     export SYSROOT
     export -f exists_or_install
     export -f dnf_download
-    export -f dnf_install
-    export -f split_scriptlets
     declare dnf_transaction
     dnf_transaction="$(get_dnf_transaction "/empty" pkg_list | tac)"
-    populate_store "$dnf_transaction" "$store_pkgs"
+    populate_store "$dnf_transaction"
     export -n SYSROOT
-    export -n store_pkgs
     export -n exists_or_install
     export -n dnf_download
-    export -n dnf_install
-    export -n split_scriptlets
 
     if [[ "$create" == "1" ]]; then
         export SYSROOT
@@ -415,16 +374,12 @@ dep() {
         export -f get_next_deployment
         export -f get_deployments
         export -f install_package
-        export -f split_scriptlets
-        export -f run_package_scripts
         create_deployment "$dnf_transaction" "$drop"
         export -n SYSROOT
         export -n create_deployment
         export -n get_next_deployment
         export -n get_deployments
         export -n install_package
-        export -n split_scriptlets
-        export -n run_package_scripts
     fi
 
     podman stop -t 2 repo-build &>/dev/null
