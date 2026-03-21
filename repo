@@ -152,6 +152,9 @@ create_deployment() {
     selinux_policy "$next_dep"
 
     umount -Rfl "$SYSROOT/.repo/deployments/$next_dep/"* || :
+
+    printf "%s" "$dnf_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
+    printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
 }
 
 system_config() {
