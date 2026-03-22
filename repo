@@ -100,7 +100,7 @@ create_deployment() {
 
     install_repo "$next_dep"
 
-    if [[ "$next_dep" == "0" ]]; then
+    if [[ "$next_dep" == "0" || "$prev_dep" == "0" ]]; then
         mv -f "/tmp/$next_dep" "$SYSROOT/.repo/deployments/$next_dep"
     else
         mkdir -p "$SYSROOT/.repo/deployments/$next_dep/"{usr,etc}
