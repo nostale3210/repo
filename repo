@@ -26,7 +26,7 @@ get_dnf_transaction() {
     transaction="$(podman exec --privileged repo-build \
         dnf install --assumeno --use-host-config --installroot "$mockdir" "${pkg_array[@]}")" || :
     transaction="$(grep "^\s[a-zA-Z0-9].*" <<< "$transaction" | grep -v "^\sInstalling.*")"
-    awk '$4 ~ /.+/' <<< "$transaction" | awk '{print $1"@"$3"."$2}'
+    awk '$5 ~ /.+/' <<< "$transaction" | awk '{print $1"@"$3"."$2}'
 }
 
 dnf_download() {
