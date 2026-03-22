@@ -41,17 +41,17 @@ exists_or_install() {
     IFS="@" read -ra pkg_split <<< "$pkg"
 
     export SYSROOT
-    for i in {1..3}; do
+    for i in {0..3}; do
         if [[ -f "$SYSROOT/.repo/store/$pkg.rpm" ]]; then
             printf "%s found in store\n" "$pkg"
             break
         else
-            sleep "$(((i-1)*3))"
+            if [[ "$i" == "3" ]]; then
+                printf "%s (%s) couldn't be downloaded\n" "$pkg" "${pkg_split[0]}"
+                exit 255;
+            fi
+            sleep "$((i*3))"
             dnf_download "$pkg" "${pkg_split[0]}"
-        fi
-        if [[ "$i" == "3" && ! "$pkg" =~ ^[[:upper:]] ]]; then
-            printf "%s (%s) couldn't be downloaded\n" "$pkg" "${pkg_split[0]}"
-            exit 255;
         fi
     done
     export -n SYSROOT
