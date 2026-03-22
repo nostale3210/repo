@@ -252,7 +252,7 @@ selinux_policy() {
 activate_dep() {
     local deployment="$1"
     local cur_dep
-    cur_dep="$(cat "$SYSROOT/usr/.repo")"
+    cur_dep="$(cat "$SYSROOT/usr/.repo")" || cur_dep="0"
 
     if [[ "$deployment" == "$cur_dep" ]]; then
         printf "%s is already activated. Exiting...\n" "$deployment"
