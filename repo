@@ -298,7 +298,7 @@ find_orphans() {
         find /.repo/store -mindepth 1 -maxdepth 1)"
     store_pkgs="$(awk -F"/" '{print $NF}' <<< "$store_pkgs" | sort)"
     used_packages="$(podman exec --privileged repo-build bash -c 'cat /.repo/deployments/*/pkgs')"
-    used_packages="$(sort -u <<< "$used_packages")"
+    used_packages="$(sort -u <<< "$used_packages" | sed "s/$/.rpm/")"
     local orphans
     orphans="$(comm -23 <(printf "%s" "$store_pkgs") <(printf "%s" "$used_packages"))"
     if [[ "$op" == "get" ]]; then
