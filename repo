@@ -6,6 +6,7 @@ REPO_IMAGE="ghcr.io/nostale3210/repo-utils:latest"
 MAX_DEPS="4"
 SUBCMD="${1-none}"
 SUBARG="${2-none}"
+SUBSUBARG="${3-none}"
 
 if [[ "$*" == *"--rootd"* ]]; then
     SYSROOT="${*: -1}"
@@ -175,6 +176,18 @@ gc_all() {
     done
 }
 
+diff_deps() {
+    local dep1="$1"
+    local dep2="$2"
+
+    if [[ "$dep1" == "none" || "$dep2" == "none" ]]; then
+        printf "This command needs two deployments. Exiting...\n"
+    fi
+
+    diff -y "$SYSROOT/.repo/deployments/$dep1/pkgs" "$SYSROOT/.repo/deployments/$dep2/pkgs" |
+        grep "<\||\|>"
+}
+
 get_next_deployment() {
     local deployments
     deployments="$(get_deployments)"
@@ -257,7 +270,7 @@ create_deployment() {
 
     selinux_policy "$next_dep"
 
-    umount -Rfl "$SYSROOT/.repo/deployments/$next_dep/"* || :
+    umount -Rfl "$SYSROOT/.repo/deployments/$next_dep/"* 2>/dev/null || :
 
     printf "%s" "$dnf_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
     printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
@@ -419,7 +432,7 @@ find_orphans() {
 
 cleanup_dep() {
     local deployment="$1"
-    umount -Rfl "$SYSROOT/.repo/deployments/$deployment/"* || :
+    umount -Rfl "$SYSROOT/.repo/deployments/$deployment/"* 2>/dev/null || :
     if [[ -f "$SYSROOT/boot/loader/entries/$deployment.conf" ]]; then
         rm -f "$SYSROOT/boot/loader/entries/$deployment.conf"
     elif [[ -f "$SYSROOT/boot/EFI/Linux/$deployment.efi" ]]; then
@@ -531,6 +544,9 @@ case "$SUBCMD" in
         ;;
     "gc")
         gc_all
+        ;;
+    "diff")
+        diff_deps "$SUBARG" "$SUBSUBARG"
         ;;
     "activate")
         printf "Activating deployment %s\n" "$SUBARG"
