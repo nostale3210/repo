@@ -2,6 +2,8 @@
 set -oueE pipefail
 
 CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
+REPO_IMAGE="ghcr.io/nostale3210/repo-utils:latest"
+MAX_DEPS="4"
 SUBCMD="${1-none}"
 SUBARG="${2-none}"
 
@@ -69,6 +71,110 @@ get_deployments() {
         awk -F"/" '{print $NF}')"
 }
 
+get_all_deployments() {
+    in_boot="$(find "$SYSROOT/boot" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" 2>/dev/null | \
+        grep "^[0-9]*$")" || :
+    in_entries="$(find "$SYSROOT/boot/loader/entries" -mindepth 1 -maxdepth 1 -type f -printf "%f\n" 2>/dev/null | \
+        grep "^[0-9]*.conf$" | \
+        sed "s/.conf$//")" || :
+    in_ukis="$(find "$SYSROOT/boot/EFI/Linux" -mindepth 1 -maxdepth 1 -type f -printf "%f\n" 2>/dev/null | \
+        grep "^[0-9]*.efi$" | \
+        sed "s/.efi$//")" || :
+    in_deps="$(find "$SYSROOT/.repo/deployments" -mindepth 1 -maxdepth 1 -type d -printf "%f\n" 2>/dev/null | \
+        grep "^[0-9]*$")" || :
+    printf "%s\n%s\n%s\n%s\n" "$in_boot" "$in_entries" "$in_ukis" "$in_deps" |
+        grep -v "^\s*$" |
+        sort -u
+}
+
+get_dep_intact() {
+    local deployment="$1"
+    local boot
+    local dep
+    if [[ -d "$SYSROOT/boot/$deployment" && -f "$SYSROOT/boot/loader/entries/$deployment.conf" ]]; then
+        boot="1"
+    else
+        boot="0"
+    fi
+    if [[ -f "$SYSROOT/boot/EFI/Linux/$deployment.efi" && "$boot" == "0" ]]; then
+        boot="1"
+    fi
+    if [[ -d "$SYSROOT/.repo/deployments/$deployment" ]]; then
+        dep="1"
+    else
+        dep="0"
+    fi
+    if [[ "$boot" == "1" && "$dep" == "1" ]]; then
+        printf "1"
+    else
+        printf "0"
+    fi
+}
+
+get_dep_status() {
+    local deployment="$1"
+    local intact
+    intact="$(get_dep_intact "$deployment")"
+    if [[ "$intact" == "0" ]]; then
+        printf "Deployment %s:\n\tdefective\n" "$deployment"
+    else
+        local kernel
+        local created
+        kernel="$(ls "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules")"
+        created="$(stat --printf "%y" "$SYSROOT/.repo/deployments/$deployment")"
+        printf "Deployment %s:\n\tKernel: %s\n\tCreated: %s\n" "$deployment" "$kernel" "$created"
+    fi
+}
+
+get_dep_stati() {
+    local deployment="$1"
+    if [[ "$deployment" == "none" || "$deployment" == "--rootd" ]]; then
+        export -f get_dep_status
+        export -f get_dep_intact
+        export SYSROOT
+        printf "\n"
+        get_all_deployments | xargs -I{} bash -c "get_dep_status {} && printf '\n'"
+        export -n get_dep_status
+        export -n get_dep_intact
+        export -n SYSROOT
+    else
+        get_dep_status "$1"
+    fi
+}
+
+gc_defective() {
+    local all_deps
+    all_deps="$(get_all_deployments)"
+    read -ra all_deps_arr <<< "$(printf "%s\n" "$all_deps" | tr "\n" " ")"
+    for dep in "${all_deps_arr[@]}"; do
+        local intact
+        intact="$(get_dep_intact "$dep")"
+        if [[ "$intact" == "0" ]]; then
+            cleanup_dep "$dep" 2>/dev/null
+        fi
+    done
+}
+
+gc_all() {
+    printf "Finding orphans in store...\n"
+    find_orphans "rm"
+    printf "Collecting broken deployments...\n"
+    gc_defective
+
+    local current_deps
+    local current_deps_num
+    current_deps="$(get_all_deployments)"
+    current_deps_num="$(wc -l <<< "$current_deps")"
+    while [[ "$current_deps_num" > "$MAX_DEPS" ]]; do
+        local dep
+        dep="$(head -n1 <<< "$current_deps")"
+        printf "Collecting deployment %s...\n" "$dep"
+        cleanup_dep "$dep" 2>/dev/null
+        current_deps="$(get_all_deployments)"
+        current_deps_num="$(wc -l <<< "$current_deps")"
+    done
+}
+
 get_next_deployment() {
     local deployments
     deployments="$(get_deployments)"
@@ -87,7 +193,7 @@ create_deployment() {
     next_dep="$(get_next_deployment)"
     prev_dep="$((next_dep-1))"
 
-    trap 'cleanup_dep "$next_dep"' INT TERM ERR
+    trap 'cleanup_dep "$next_dep" 2>/dev/null' INT TERM ERR
 
     printf "Creating deployment %s...\n" "$next_dep"
 
@@ -201,7 +307,7 @@ boot_files() {
 
 install_repo() {
     local deployment="$1"
-    podman create --privileged --replace --pull newer --name repo-tmp ghcr.io/nostale3210/repo-utils:latest
+    podman create --privileged --replace --pull newer --name repo-tmp "$REPO_IMAGE"
     podman cp repo-tmp:/app/repo "/tmp/$deployment/usr/bin/repo"
     podman cp repo-tmp:/app/move-mount "/tmp/$deployment/usr/bin/move-mount"
     podman cp repo-tmp:/app/init/90repo "/tmp/$deployment/usr/lib/dracut/modules.d/90repo"
@@ -212,7 +318,7 @@ install_repo() {
 }
 
 init_repo() {
-    podman create --privileged --replace --pull newer --name repo-tmp ghcr.io/nostale3210/repo-utils:latest
+    podman create --privileged --replace --pull newer --name repo-tmp "$REPO_IMAGE"
 
     podman cp repo-tmp:/app/repo "$SYSROOT/usr/bin/repo"
     podman cp repo-tmp:/app/move-mount "$SYSROOT/usr/bin/move-mount"
@@ -328,6 +434,9 @@ cleanup_dep() {
     if [[ -d "$SYSROOT/.repo/deployments/$deployment" ]]; then
         rm -rf "$SYSROOT/.repo/deployments/$deployment"
     fi
+    if [[ -d "/tmp/$deployment" ]]; then
+        rm -rf "/tmp/$deployment"
+    fi
     podman stop -t 1 repo-build &>/dev/null
     printf "Cleaned up deployment %s\n" "$deployment"
 }
@@ -409,9 +518,19 @@ case "$SUBCMD" in
         printf "Finding orphaned paths in the store...\n"
         find_orphans "get"
         ;;
-    "gc")
+    "status")
+        get_dep_stati "$SUBARG"
+        ;;
+    "gc-store")
         printf "Removing unused store paths...\n"
         find_orphans "rm"
+        ;;
+    "gc-deps")
+        printf "Collecting broken deps...\n"
+        gc_defective
+        ;;
+    "gc")
+        gc_all
         ;;
     "activate")
         printf "Activating deployment %s\n" "$SUBARG"
