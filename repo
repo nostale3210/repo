@@ -234,7 +234,7 @@ install_package() {
     local dnf_transaction
     dnf_transaction="$(sed "s/\(.*\)$/\/.repo\/store\/\1.rpm/" <<< "$2")"
     read -ra pkg_array <<< "$(tr "\n" " " <<< "$dnf_transaction")"
-    podman exec --privileged repo-build dnf install -y --installroot="/tmp/$deployment" "${pkg_array[@]}"
+    podman exec --privileged repo-build dnf install -y --installroot="/tmp/$deployment" "${pkg_array[@]}" || :
 }
 
 selinux_policy() {
