@@ -174,7 +174,7 @@ system_config() {
         "$SYSROOT/etc/NetworkManager/system-connections" "$SYSROOT/etc/vconsole.conf" \
         "$SYSROOT/etc/pki" "$SYSROOT/etc/firewalld" "$SYSROOT/etc/environment" \
         "$SYSROOT/etc/hostname" "$SYSROOT/etc/X11/xorg.conf.d/00-keyboard.conf" \
-        "$SYSROOT/etc/sudoers" "$SYSROOT/etc/ald" \
+        "$SYSROOT/etc/sudoers" "$SYSROOT/etc/repo" \
         "$SYSROOT/.repo/deployments/$deployment/" 2>/dev/null || :
 
     sort "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployment/etc/passwd" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp" &&
