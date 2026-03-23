@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -oueE pipefail
 
-CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
 REPO_IMAGE="ghcr.io/nostale3210/repo-utils:latest"
 MAX_DEPS="4"
 SUBCMD="${1-none}"
@@ -20,6 +19,16 @@ get_pkg_list() {
     printf "%s" "$(cat "$list" | grep -v -e "^#" -e "^\s*$")"
 }
 
+get_pm_transaction() {
+    local mockdir="$1"
+    local -n pkgs="$2"
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            get_dnf_transaction "$mockdir" "$pkgs"
+            ;;
+    esac
+}
+
 get_dnf_transaction() {
     local mockdir="$1"
     local -n pkgs="$2"
@@ -32,11 +41,22 @@ get_dnf_transaction() {
     awk '$5 ~ /.+/' <<< "$transaction" | awk '{print $1"@"$3"."$2}'
 }
 
+pm_download() {
+    local pkg="$1"
+    local pkg_name="$2"
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            dnf_download "$pkg" "$pkg_name"
+            ;;
+    esac
+}
+
 dnf_download() {
     local pkg="$1"
     local pkg_name="$2"
-    podman exec --privileged repo-build bash -c "dnf download -y --destdir /tmp ${pkg//@/-}
-    mv -f /tmp/$pkg_name*.rpm /.repo/store/$pkg.rpm"
+    podman exec --privileged repo-build bash -c "dnf download -y --destdir /tmp ${pkg//@/-} &&
+    mv -f /tmp/$pkg_name*.rpm /.repo/store/$pkg.rpm &&
+    touch /.repo/store/$pkg.repo-lock"
 }
 
 exists_or_install() {
@@ -45,7 +65,7 @@ exists_or_install() {
 
     export SYSROOT
     for i in {0..3}; do
-        if [[ -f "$SYSROOT/.repo/store/$pkg.rpm" ]]; then
+        if [[ -f "$SYSROOT/.repo/store/$pkg.repo-lock" ]]; then
             printf "%s found in store\n" "$pkg"
             break
         else
@@ -54,15 +74,15 @@ exists_or_install() {
                 exit 255;
             fi
             sleep "$((i*3))"
-            dnf_download "$pkg" "${pkg_split[0]}"
+            pm_download "$pkg" "${pkg_split[0]}"
         fi
     done
     export -n SYSROOT
 }
 
 populate_store() {
-    local dnf_transaction="$1"
-    printf "%s" "$dnf_transaction" | xargs -P"$(nproc)" -I{} \
+    local pm_transaction="$1"
+    printf "%s" "$pm_transaction" | xargs -P"$(nproc)" -I{} \
         bash -c 'exists_or_install "$@"' _ {} ||
         { printf "Couldn't install some packages. Exiting...\n"; exit 1; }
 }
@@ -207,8 +227,29 @@ get_next_deployment() {
     fi
 }
 
+container_setup() {
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            podman exec --privileged repo-build dnf install -y dnf5-plugins
+            ;;
+    esac
+}
+
+container_metadata_update() {
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            podman exec --privileged repo-build dnf check-upgrade --refresh -y
+            podman exec --privileged repo-build dnf makecache -y
+            podman exec --privileged repo-build \
+                dnf check-upgrade --refresh -y --use-host-config --installroot /empty
+            podman exec --privileged repo-build \
+                dnf makecache -y --use-host-config --installroot /empty
+            ;;
+    esac
+}
+
 create_deployment() {
-    local dnf_transaction="$1"
+    local pm_transaction="$1"
     local options="$2"
     local prev_dep
     local next_dep
@@ -222,7 +263,7 @@ create_deployment() {
     podman exec --privileged repo-build bash -c "mkdir -p /tmp/$next_dep/{usr,etc}"
 
     export next_dep
-    install_package "$next_dep" "$dnf_transaction" :
+    install_packages "$next_dep" "$pm_transaction" :
 
     podman exec --privileged repo-build cp /scripts/post.sh "/tmp/$next_dep/post.sh"
 
@@ -234,10 +275,13 @@ create_deployment() {
         mkdir -p "$SYSROOT/.repo/deployments/$next_dep/"{usr,etc}
         printf "Hardlinking previous deployment...\n"
         rsync -aHlx --link-dest="../../$prev_dep/usr/" "$SYSROOT/.repo/deployments/$prev_dep/usr/" "$SYSROOT/.repo/deployments/$next_dep/usr/"
+
         printf "Syncing previous config...\n"
         rsync -aHlx "$SYSROOT/.repo/deployments/$prev_dep/etc/" "$SYSROOT/.repo/deployments/$next_dep/etc/"
+
         printf "Syncing next directory skeleton...\n"
         rsync -ac -f"+ */" -f"- *" --delete "/tmp/$next_dep/" "$SYSROOT/.repo/deployments/$next_dep/"
+
         printf "Syncing next deployment to disk...\n"
         find "/tmp/$next_dep" -not -type d -printf "%s\t%p\n" |
             sort -nr | cut -f2- | sed "s/^\(\/tmp\/$next_dep\)/\1\/./g" |
@@ -246,6 +290,7 @@ create_deployment() {
             -e "^/tmp/$next_dep/\./lib" -e "^/tmp/$next_dep/\./lib64" |
             xargs -n5000 -P"$(nproc)" \
             bash -c 'sysroot="$0" && shift && rsync -aHlcx --delete --relative --ignore-missing-args "$@" "$sysroot/.repo/deployments/$next_dep/"' "$SYSROOT" _
+
         printf "Trimming image...\n"
         local dirty
         local clean
@@ -277,11 +322,15 @@ create_deployment() {
     mkdir "$SYSROOT/boot/$next_dep"
     boot_files "$next_dep"
 
-    selinux_policy "$next_dep"
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            selinux_policy "$next_dep"
+            ;;
+    esac
 
     umount -Rfl "$SYSROOT/.repo/deployments/$next_dep/"* 2>/dev/null || :
 
-    printf "%s" "$dnf_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
+    printf "%s" "$pm_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
     printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
 
     export -n next_dep
@@ -355,10 +404,16 @@ install_repo() {
     podman create --privileged --replace --pull newer --name repo-tmp "$REPO_IMAGE"
     podman cp repo-tmp:/app/repo "/tmp/$deployment/usr/bin/repo"
     podman cp repo-tmp:/app/move-mount "/tmp/$deployment/usr/bin/move-mount"
-    podman cp repo-tmp:/app/init/90repo "/tmp/$deployment/usr/lib/dracut/modules.d/90repo"
-    podman cp repo-tmp:/app/init/repo-boot.service "/tmp/$deployment/usr/lib/systemd/system/repo-boot.service"
     podman cp repo-tmp:/app/init/repo-boot.sh "/tmp/$deployment/usr/libexec/repo-boot.sh"
     chmod +x "/tmp/$deployment/usr/libexec/repo-boot.sh"
+
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            podman cp repo-tmp:/app/init/90repo "/tmp/$deployment/usr/lib/dracut/modules.d/90repo"
+            podman cp repo-tmp:/app/init/repo-boot.service "/tmp/$deployment/usr/lib/systemd/system/repo-boot.service"
+            ;;
+    esac
+
     podman rm repo-tmp
 }
 
@@ -367,10 +422,15 @@ init_repo() {
 
     podman cp repo-tmp:/app/repo "$SYSROOT/usr/bin/repo"
     podman cp repo-tmp:/app/move-mount "$SYSROOT/usr/bin/move-mount"
-    podman cp repo-tmp:/app/init/90repo "$SYSROOT/usr/lib/dracut/modules.d/90repo"
-    podman cp repo-tmp:/app/init/repo-boot.service "$SYSROOT/usr/lib/systemd/system/repo-boot.service"
     podman cp repo-tmp:/app/init/repo-boot.sh "$SYSROOT/usr/libexec/repo-boot.sh"
     chmod +x "$SYSROOT/usr/libexec/repo-boot.sh"
+
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            podman cp repo-tmp:/app/init/90repo "$SYSROOT/usr/lib/dracut/modules.d/90repo"
+            podman cp repo-tmp:/app/init/repo-boot.service "$SYSROOT/usr/lib/systemd/system/repo-boot.service"
+            ;;
+    esac
 
     mkdir -p "$SYSROOT/.repo/"{store,deployments/0}
     mkdir -p "$SYSROOT/etc/repo"
@@ -380,12 +440,17 @@ init_repo() {
     podman rm repo-tmp
 }
 
-install_package() {
+install_packages() {
     local deployment="$1"
-    local dnf_transaction
-    dnf_transaction="$(sed "s/\(.*\)$/\/.repo\/store\/\1.rpm/" <<< "$2")"
-    read -ra pkg_array <<< "$(tr "\n" " " <<< "$dnf_transaction")"
-    podman exec --privileged repo-build dnf install -y --installroot="/tmp/$deployment" "${pkg_array[@]}" || :
+    local pm_transaction
+    pm_transaction="$(sed "s/\(.*\)$/\/.repo\/store\/\1/" <<< "$2")"
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            pm_transaction="$(sed "s/$/.rpm/" <<< "$pm_transaction")"
+            read -ra pkg_array <<< "$(tr "\n" " " <<< "$pm_transaction")"
+            podman exec --privileged repo-build dnf install -y --installroot="/tmp/$deployment" "${pkg_array[@]}" || :
+            ;;
+    esac
 }
 
 selinux_policy() {
@@ -441,25 +506,27 @@ activate_dep() {
 
 find_orphans() {
     local op="$1"
-    podman start repo-build
+    podman start repo-build &>/dev/null
 
-    declare store_pkgs
+    local store_pkgs
     local used_packages
     store_pkgs="$(podman exec --privileged repo-build \
         find /.repo/store -mindepth 1 -maxdepth 1)"
-    store_pkgs="$(awk -F"/" '{print $NF}' <<< "$store_pkgs" | sort)"
+    store_pkgs="$(awk -F"/" '{print $NF}' <<< "$store_pkgs" | sed "s/\.[a-zA-Z-]*$//" | sort -u)"
     used_packages="$(podman exec --privileged repo-build bash -c 'cat /.repo/deployments/*/pkgs')"
-    used_packages="$(sort -u <<< "$used_packages" | sed "s/$/.rpm/")"
+    used_packages="$(sort -u <<< "$used_packages")"
+
     local orphans
     orphans="$(comm -23 <(printf "%s" "$store_pkgs") <(printf "%s" "$used_packages"))"
     if [[ "$op" == "get" ]]; then
         printf "%s\n" "$orphans"
     elif [[ "$op" == "rm" ]]; then
-        printf "%s" "$orphans" | sed "s/^/\/.repo\/store\//" | xargs podman exec --privileged repo-build \
-            rm -rf
+        printf "%s" "$orphans" | sed "s/^/\/.repo\/store\//" | \
+        xargs -I{} podman exec --privileged repo-build \
+            bash -c "rm -rf {}.repo-lock; rm -rf {}.*"
     fi
 
-    podman stop -t 2 repo-build &>/dev/null
+    podman stop -t 1 repo-build &>/dev/null
 }
 
 cleanup_dep() {
@@ -506,7 +573,7 @@ dep() {
     fi
     podman start repo-build
     if [[ "$replace" == "1" ]]; then
-        podman exec --privileged repo-build dnf install -y dnf5-plugins
+        container_setup
     fi
 
     if [[ -f "$SYSROOT/etc/repo/scripts/pre.sh" ]]; then
@@ -516,12 +583,7 @@ dep() {
     fi
 
     if [[ "$options" =~ update ]]; then
-        podman exec --privileged repo-build dnf check-upgrade --refresh -y
-        podman exec --privileged repo-build dnf makecache -y
-        podman exec --privileged repo-build \
-            dnf check-upgrade --refresh -y --use-host-config --installroot /empty
-        podman exec --privileged repo-build \
-            dnf makecache -y --use-host-config --installroot /empty
+        container_metadata_update
     fi
 
     declare pkg_list
@@ -529,9 +591,9 @@ dep() {
     export SYSROOT
     export -f exists_or_install
     export -f dnf_download
-    declare dnf_transaction
-    dnf_transaction="$(get_dnf_transaction "/empty" pkg_list | tac)"
-    populate_store "$dnf_transaction"
+    declare pm_transaction
+    pm_transaction="$(get_pm_transaction "/empty" pkg_list | tac)"
+    populate_store "$pm_transaction"
     export -n SYSROOT
     export -n exists_or_install
     export -n dnf_download
@@ -541,17 +603,25 @@ dep() {
         export -f create_deployment
         export -f get_next_deployment
         export -f get_deployments
-        export -f install_package
-        create_deployment "$dnf_transaction" "$options"
+        export -f install_packages
+        create_deployment "$pm_transaction" "$options"
         export -n SYSROOT
         export -n create_deployment
         export -n get_next_deployment
         export -n get_deployments
-        export -n install_package
+        export -n install_packages
     fi
 
     podman stop -t 2 repo-build &>/dev/null
 }
+
+if hash dnf; then
+    PACKAGE_MANAGER="${PACKAGE_MANAGER:-dnf}"
+    CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
+else
+    printf "No supported package manager detected. Exiting...\n"
+    exit 1
+fi
 
 case "$SUBCMD" in
     "none")
