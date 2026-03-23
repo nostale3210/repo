@@ -166,7 +166,7 @@ gc_all() {
     local current_deps_num
     current_deps="$(get_all_deployments)"
     current_deps_num="$(wc -l <<< "$current_deps")"
-    while [[ "$current_deps_num" > "$MAX_DEPS" ]]; do
+    while [[ "$current_deps_num" -gt "$MAX_DEPS" ]]; do
         local dep
         dep="$(head -n1 <<< "$current_deps")"
         printf "Collecting deployment %s...\n" "$dep"
@@ -274,6 +274,8 @@ create_deployment() {
 
     printf "%s" "$dnf_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
     printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
+
+    export -n next_dep
 }
 
 system_config() {
@@ -311,8 +313,29 @@ boot_files() {
     kernel="$(find "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules" -name vmlinuz | sort | tail -n1)"
     initrd="$(find "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules" -name initramfs.img | sort | tail -n1)"
 
-    cp -fa "$kernel" "$SYSROOT/boot/$deployment/vmlinuz"
-    cp -fa "$initrd" "$SYSROOT/boot/$deployment/initramfs.img"
+    local boot_type
+    if hash ukify; then
+        local cmdline
+        boot_type="uki"
+        cmdline="$(cat "$SYSROOT/etc/repo/boot.conf" | \
+            grep "^options " | \
+            sed "s/^options //" | \
+            sed "s/INSERT_DEPLOYMENT/$deployment/g")"
+        ukify build --linux="$kernel" --initrd="$initrd" \
+            --cmdline="$cmdline" --output="$SYSROOT/boot/EFI/Linux/$deployment.efi"
+    else
+        boot_type="default"
+        cp -fa "$kernel" "$SYSROOT/boot/$deployment/vmlinuz"
+        cp -fa "$initrd" "$SYSROOT/boot/$deployment/initramfs.img"
+    fi
+
+    if hash sbctl && [[ -d "$SYSROOT/var/lib/sbctl" ]]; then
+        if [[ "$boot_type" == "uki" ]]; then
+            sbctl sign "$SYSROOT/boot/EFI/Linux/$deployment.efi"
+        else
+            sbctl sign "$SYSROOT/boot/$deployment/vmlinuz"
+        fi
+    fi
 
     printf "Creating boot entry...\n"
     cat "$SYSROOT/etc/repo/boot.conf" | sed "s/INSERT_DEPLOYMENT/$deployment/g" > "$SYSROOT/boot/loader/entries/$deployment.conf"
