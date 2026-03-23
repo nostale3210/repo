@@ -619,8 +619,7 @@ if hash dnf; then
     PACKAGE_MANAGER="${PACKAGE_MANAGER:-dnf}"
     CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
 else
-    printf "No supported package manager detected. Exiting...\n"
-    exit 1
+    printf "No supported package manager detected. Things might break.\n"
 fi
 
 case "$SUBCMD" in
