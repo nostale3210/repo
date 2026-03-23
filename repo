@@ -35,7 +35,7 @@ get_dnf_transaction() {
 dnf_download() {
     local pkg="$1"
     local pkg_name="$2"
-    podman exec --privileged repo-build bash -c "dnf download --destdir /tmp ${pkg//@/-}
+    podman exec --privileged repo-build bash -c "dnf download -y --destdir /tmp ${pkg//@/-}
     mv -f /tmp/$pkg_name*.rpm /.repo/store/$pkg.rpm"
 }
 
@@ -481,6 +481,7 @@ dep() {
             bash /scripts/pre.sh
     fi
 
+    podman exec --privileged repo-build dnf makecache -y --use-host-config --installroot /empty
     declare pkg_list
     pkg_list="$(get_pkg_list "$SYSROOT/etc/repo/list.pkgs")"
     export SYSROOT
