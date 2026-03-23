@@ -186,8 +186,11 @@ diff_deps() {
     local dep1="$1"
     local dep2="$2"
 
-    if [[ "$dep1" == "none" || "$dep2" == "none" ]]; then
-        printf "This command needs two deployments. Exiting...\n"
+    if [[ "$dep1" == "none" && "$dep2" == "none" ]]; then
+        dep2="$(get_all_deployments | tac | sed "1q;d")"
+        dep1="$(get_all_deployments | tac | sed "2q;d")"
+    elif [[ "$dep1" == "none" || "$dep2" == "none" ]]; then
+        printf "This command needs two deployments (or none). Exiting...\n"
     fi
 
     diff -y "$SYSROOT/.repo/deployments/$dep1/pkgs" "$SYSROOT/.repo/deployments/$dep2/pkgs" |
