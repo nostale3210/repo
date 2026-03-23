@@ -85,7 +85,7 @@ get_all_deployments() {
         grep "^[0-9]*$")" || :
     printf "%s\n%s\n%s\n%s\n" "$in_boot" "$in_entries" "$in_ukis" "$in_deps" |
         grep -v "^\s*$" |
-        sort -u
+        sort -un
 }
 
 get_dep_intact() {
