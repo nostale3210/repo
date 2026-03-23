@@ -27,7 +27,7 @@ get_dnf_transaction() {
 
     local transaction
     transaction="$(podman exec --privileged repo-build \
-        dnf install --assumeno --use-host-config --installroot "$mockdir" "${pkg_array[@]}")" || :
+        dnf install --assumeno --cacheonly --use-host-config --installroot "$mockdir" "${pkg_array[@]}")" || :
     transaction="$(grep "^\s[a-zA-Z0-9].*" <<< "$transaction" | grep -v "^\sInstalling.*")"
     awk '$5 ~ /.+/' <<< "$transaction" | awk '{print $1"@"$3"."$2}'
 }
@@ -209,7 +209,7 @@ get_next_deployment() {
 
 create_deployment() {
     local dnf_transaction="$1"
-    local drop="$2"
+    local options="$2"
     local prev_dep
     local next_dep
     next_dep="$(get_next_deployment)"
@@ -272,7 +272,7 @@ create_deployment() {
             /usr/bin/env "PATH=/usr/bin" bash /post.sh
     fi
 
-    system_config "$next_dep" "$drop"
+    system_config "$next_dep" "$options"
 
     mkdir "$SYSROOT/boot/$next_dep"
     boot_files "$next_dep"
@@ -289,12 +289,12 @@ create_deployment() {
 
 system_config() {
     local deployment="$1"
-    local drop="$2"
+    local options="$2"
 
     printf "Syncing system config...\n"
     find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
 
-    if [[ "$drop" != "drop" ]]; then
+    if [[ ! "$options" =~ drop ]]; then
         find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/" || :
     fi
 
@@ -494,9 +494,8 @@ cleanup_dep() {
 
 dep() {
     local replace="$1"
-    local update="$2"
-    local create="$3"
-    local drop="$4"
+    local create="$2"
+    local options="$3"
 
     if [[ "$replace" == "1" ]]; then
         podman create --privileged --name repo-build --replace -ti \
@@ -509,9 +508,6 @@ dep() {
     if [[ "$replace" == "1" ]]; then
         podman exec --privileged repo-build dnf install -y dnf5-plugins
     fi
-    if [[ "$update" == "1" && "$replace" == "0" ]]; then
-        podman exec --privileged repo-build dnf check-upgrade --refresh -y
-    fi
 
     if [[ -f "$SYSROOT/etc/repo/scripts/pre.sh" ]]; then
         printf "Running pre script...\n"
@@ -519,7 +515,15 @@ dep() {
             bash /scripts/pre.sh
     fi
 
-    podman exec --privileged repo-build dnf makecache -y --use-host-config --installroot /empty
+    if [[ "$options" =~ update ]]; then
+        podman exec --privileged repo-build dnf check-upgrade --refresh -y
+        podman exec --privileged repo-build dnf makecache -y
+        podman exec --privileged repo-build \
+            dnf check-upgrade --refresh -y --use-host-config --installroot /empty
+        podman exec --privileged repo-build \
+            dnf makecache -y --use-host-config --installroot /empty
+    fi
+
     declare pkg_list
     pkg_list="$(get_pkg_list "$SYSROOT/etc/repo/list.pkgs")"
     export SYSROOT
@@ -538,7 +542,7 @@ dep() {
         export -f get_next_deployment
         export -f get_deployments
         export -f install_package
-        create_deployment "$dnf_transaction" "$drop"
+        create_deployment "$dnf_transaction" "$options"
         export -n SYSROOT
         export -n create_deployment
         export -n get_next_deployment
@@ -556,15 +560,15 @@ case "$SUBCMD" in
         ;;
     "dep")
         printf "Creating new deployment...\n"
-        dep "0" "0" "1" "$SUBARG"
+        dep "0" "1" "$SUBARG"
         ;;
     "update")
         printf "Updating store and creating new deployment...\n"
-        dep "0" "1" "1" "$SUBARG"
+        dep "0" "1" "$SUBARG"
         ;;
     "recreate")
         printf "Recreating build container and rebuilding store...\n"
-        dep "1" "0" "0" "$SUBARG"
+        dep "1" "0" "$SUBARG"
         ;;
     "get-orphans")
         printf "Finding orphaned paths in the store...\n"
