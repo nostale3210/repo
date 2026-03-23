@@ -121,9 +121,14 @@ get_dep_status() {
     else
         local kernel
         local created
+        local active=""
         kernel="$(ls "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules")"
         created="$(stat --printf "%y" "$SYSROOT/.repo/deployments/$deployment")"
-        printf "Deployment %s:\n\tKernel: %s\n\tCreated: %s\n" "$deployment" "$kernel" "$created"
+        if [[ "$(cat "$SYSROOT/usr/.repo")" == "$deployment" ]]; then
+            active=" (active)";
+        fi
+        printf "Deployment %s:%s\n\tKernel: %s\n\tCreated: %s\n" \
+            "$deployment" "$active" "$kernel" "$created"
     fi
 }
 
@@ -134,7 +139,7 @@ get_dep_stati() {
         export -f get_dep_intact
         export SYSROOT
         printf "\n"
-        get_all_deployments | xargs -I{} bash -c "get_dep_status {} && printf '\n'"
+        get_all_deployments | tac | xargs -I{} bash -c "get_dep_status {} && printf '\n'"
         export -n get_dep_status
         export -n get_dep_intact
         export -n SYSROOT
@@ -157,8 +162,6 @@ gc_defective() {
 }
 
 gc_all() {
-    printf "Finding orphans in store...\n"
-    find_orphans "rm"
     printf "Collecting broken deployments...\n"
     gc_defective
 
@@ -174,6 +177,9 @@ gc_all() {
         current_deps="$(get_all_deployments)"
         current_deps_num="$(wc -l <<< "$current_deps")"
     done
+
+    printf "Finding orphans in store...\n"
+    find_orphans "rm"
 }
 
 diff_deps() {
@@ -327,6 +333,9 @@ boot_files() {
         boot_type="default"
         cp -fa "$kernel" "$SYSROOT/boot/$deployment/vmlinuz"
         cp -fa "$initrd" "$SYSROOT/boot/$deployment/initramfs.img"
+
+        printf "Creating boot entry...\n"
+        cat "$SYSROOT/etc/repo/boot.conf" | sed "s/INSERT_DEPLOYMENT/$deployment/g" > "$SYSROOT/boot/loader/entries/$deployment.conf"
     fi
 
     if hash sbctl && [[ -d "$SYSROOT/var/lib/sbctl" ]]; then
@@ -336,9 +345,6 @@ boot_files() {
             sbctl sign "$SYSROOT/boot/$deployment/vmlinuz"
         fi
     fi
-
-    printf "Creating boot entry...\n"
-    cat "$SYSROOT/etc/repo/boot.conf" | sed "s/INSERT_DEPLOYMENT/$deployment/g" > "$SYSROOT/boot/loader/entries/$deployment.conf"
 }
 
 install_repo() {
@@ -455,6 +461,12 @@ find_orphans() {
 
 cleanup_dep() {
     local deployment="$1"
+    local cur_dep
+    cur_dep="$(cat "$SYSROOT/usr/.repo")"
+    if [[ "$deployment" == "$cur_dep" ]]; then
+        printf "Not removing currently active deployment...\n"
+        return
+    fi
     umount -Rfl "$SYSROOT/.repo/deployments/$deployment/"* 2>/dev/null || :
     if [[ -f "$SYSROOT/boot/loader/entries/$deployment.conf" ]]; then
         rm -f "$SYSROOT/boot/loader/entries/$deployment.conf"
@@ -565,6 +577,10 @@ case "$SUBCMD" in
     "gc-deps")
         printf "Collecting broken deps...\n"
         gc_defective
+        ;;
+    "rm")
+        printf "Removing dep %s...\n" "$SUBARG"
+        cleanup_dep "$SUBARG"
         ;;
     "gc")
         gc_all
