@@ -182,24 +182,32 @@ gc_defective() {
 }
 
 gc_all() {
-    printf "Collecting broken deployments...\n"
-    gc_defective
+    local opts="$1"
+    if [[ "$opts" == "none" || "$opts" =~ broken ]]; then
+        printf "Collecting broken deployments...\n"
+        gc_defective
+    fi
 
-    local current_deps
-    local current_deps_num
-    current_deps="$(get_all_deployments)"
-    current_deps_num="$(wc -l <<< "$current_deps")"
-    while [[ "$current_deps_num" -gt "$MAX_DEPS" ]]; do
-        local dep
-        dep="$(head -n1 <<< "$current_deps")"
-        printf "Collecting deployment %s...\n" "$dep"
-        cleanup_dep "$dep" 2>/dev/null
+    if [[ "$opts" == "none" || "$opts" =~ deps ]]; then
+        printf "Collecting old deployments...\n"
+        local current_deps
+        local current_deps_num
         current_deps="$(get_all_deployments)"
         current_deps_num="$(wc -l <<< "$current_deps")"
-    done
+        while [[ "$current_deps_num" -gt "$MAX_DEPS" ]]; do
+            local dep
+            dep="$(head -n1 <<< "$current_deps")"
+            printf "Collecting deployment %s...\n" "$dep"
+            cleanup_dep "$dep" 2>/dev/null
+            current_deps="$(get_all_deployments)"
+            current_deps_num="$(wc -l <<< "$current_deps")"
+        done
+    fi
 
-    printf "Finding orphans in store...\n"
-    find_orphans "rm"
+    if [[ "$opts" == "none" || "$opts" =~ store ]]; then
+        printf "Finding orphans in store...\n"
+        find_orphans "rm"
+    fi
 }
 
 diff_deps() {
@@ -518,8 +526,9 @@ find_orphans() {
     local orphans
     orphans="$(comm -23 <(printf "%s" "$store_pkgs") <(printf "%s" "$used_packages"))"
     if [[ "$op" == "get" ]]; then
-        printf "%s\n" "$orphans"
+        printf "Orphaned packages:\n%s\n" "$(sed 's/^/\t/' <<< "$orphans")"
     elif [[ "$op" == "rm" ]]; then
+        printf "Removing orphaned packages:\n%s\n" "$(sed 's/^/\t/' <<< "$orphans")"
         printf "%s" "$orphans" | sed "s/^$SYSROOT/\/.repo\/store\//" | \
         xargs -I{} bash -c "rm -rf {}.repo-lock; rm -rf {}.*"
     fi
@@ -642,20 +651,12 @@ case "$SUBCMD" in
     "status")
         get_dep_stati "$SUBARG"
         ;;
-    "gc-store")
-        printf "Removing unused store paths...\n"
-        find_orphans "rm"
-        ;;
-    "gc-deps")
-        printf "Collecting broken deps...\n"
-        gc_defective
-        ;;
     "rm")
         printf "Removing dep %s...\n" "$SUBARG"
         cleanup_dep "$SUBARG"
         ;;
     "gc")
-        gc_all
+        gc_all "$SUBARG"
         ;;
     "diff")
         diff_deps "$SUBARG" "$SUBSUBARG"
