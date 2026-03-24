@@ -18,6 +18,7 @@ install() {
     inst_multiple /usr/libexec/repo-boot.sh \
         "$systemdsystemunitdir"/repo-boot.service \
         repo \
+        id \
         move-mount \
         mountpoint
 
