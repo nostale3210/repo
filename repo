@@ -214,16 +214,23 @@ diff_deps() {
     local dep1="$1"
     local dep2="$2"
 
+    local latest
+    local snd_latest
+    latest="$(get_all_deployments | tac | sed "1q;d")"
+    snd_latest="$(get_all_deployments | tac | sed "2q;d")"
     if [[ "$dep1" == "none" && "$dep2" == "none" ]]; then
-        dep2="$(get_all_deployments | tac | sed "1q;d")"
-        dep1="$(get_all_deployments | tac | sed "2q;d")"
-    elif [[ "$dep1" == "none" || "$dep2" == "none" ]]; then
-        printf "This command needs two deployments (or none). Exiting...\n"
+        dep2="$latest"
+        dep1="$snd_latest"
+    elif [[ "$dep1" != "none" && "$dep2" == "none" ]]; then
+        if [[ "$dep1" == "$latest" ]]; then
+            dep1="$snd_latest"
+        fi
+        dep2="$latest"
     fi
 
-    printf "Comparing deployments %s and %s\n" "$dep1" "$dep2"
+    printf "Comparing deployments %s and %s:\n" "$dep1" "$dep2"
     diff -y "$SYSROOT/.repo/deployments/$dep1/pkgs" "$SYSROOT/.repo/deployments/$dep2/pkgs" |
-        grep "<\||\|>" || printf "No difference found\n"
+        grep "<\||\|>" || :
 }
 
 get_next_deployment() {
