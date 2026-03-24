@@ -213,8 +213,9 @@ diff_deps() {
         printf "This command needs two deployments (or none). Exiting...\n"
     fi
 
+    printf "Comparing deployments %s and %s\n" "$dep1" "$dep2"
     diff -y "$SYSROOT/.repo/deployments/$dep1/pkgs" "$SYSROOT/.repo/deployments/$dep2/pkgs" |
-        grep "<\||\|>"
+        grep "<\||\|>" || printf "No difference found\n"
 }
 
 get_next_deployment() {
@@ -506,14 +507,12 @@ activate_dep() {
 
 find_orphans() {
     local op="$1"
-    podman start repo-build &>/dev/null
 
     local store_pkgs
     local used_packages
-    store_pkgs="$(podman exec --privileged repo-build \
-        find /.repo/store -mindepth 1 -maxdepth 1)"
+    store_pkgs="$(find "$SYSROOT/.repo/store" -mindepth 1 -maxdepth 1)"
     store_pkgs="$(awk -F"/" '{print $NF}' <<< "$store_pkgs" | sed "s/\.[a-zA-Z-]*$//" | sort -u)"
-    used_packages="$(podman exec --privileged repo-build bash -c 'cat /.repo/deployments/*/pkgs')"
+    used_packages="$(cat "$SYSROOT"/.repo/deployments/*/pkgs)"
     used_packages="$(sort -u <<< "$used_packages")"
 
     local orphans
@@ -521,12 +520,9 @@ find_orphans() {
     if [[ "$op" == "get" ]]; then
         printf "%s\n" "$orphans"
     elif [[ "$op" == "rm" ]]; then
-        printf "%s" "$orphans" | sed "s/^/\/.repo\/store\//" | \
-        xargs -I{} podman exec --privileged repo-build \
-            bash -c "rm -rf {}.repo-lock; rm -rf {}.*"
+        printf "%s" "$orphans" | sed "s/^$SYSROOT/\/.repo\/store\//" | \
+        xargs -I{} bash -c "rm -rf {}.repo-lock; rm -rf {}.*"
     fi
-
-    podman stop -t 1 repo-build &>/dev/null
 }
 
 cleanup_dep() {
