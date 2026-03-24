@@ -350,6 +350,11 @@ create_deployment() {
     printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
 
     export -n next_dep
+
+    if [[ "$options" =~ activate ]]; then
+        printf "Activating deployment %s\n" "$next_dep"
+        activate_dep "$next_dep"
+    fi
 }
 
 system_config() {
