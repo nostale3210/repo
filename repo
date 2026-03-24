@@ -640,7 +640,7 @@ if [[ "$(id -u)" != "0" ]]; then
             printf "No subcommand was specified!\n"
             exit 1
             ;;
-        "get-orphans")
+        "orphans")
             printf "Finding orphaned paths in the store...\n"
             find_orphans "get"
             ;;
@@ -669,7 +669,7 @@ else
             printf "Recreating build container and rebuilding store...\n"
             dep "1" "0" "$SUBARG"
             ;;
-        "get-orphans")
+        "orphans")
             printf "Finding orphaned paths in the store...\n"
             find_orphans "get"
             ;;
