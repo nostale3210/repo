@@ -11,7 +11,7 @@ source "$SYSROOT/etc/repo/repo.conf" || :
 
 REPO_IMAGE="${REPO_IMAGE:-ghcr.io/nostale3210/repo-utils:latest}"
 MAX_DEPS="${MAX_DEPS:-4}"
-HOSTONLY_INITRD="${HOSTONLY_INITRD:-1}"
+HOSTONLY_INITRD="${HOSTONLY_INITRD:-0}"
 SUBCMD="${1-none}"
 SUBARG="${2-none}"
 SUBSUBARG="${3-none}"
@@ -618,7 +618,7 @@ dep() {
     local options="$3"
 
     if [[ "$replace" == "1" ]]; then
-        podman create --privileged --name repo-build --replace -ti \
+        podman create --privileged --name repo-build --replace --pull newer -ti \
             --volume "$SYSROOT/.repo":/.repo \
             --volume "$SYSROOT/etc/repo/scripts":/scripts \
             --volume /tmp:/tmp \
