@@ -3,6 +3,7 @@ set -oueE pipefail
 
 REPO_IMAGE="ghcr.io/nostale3210/repo-utils:latest"
 MAX_DEPS="4"
+HOSTONLY_INITRD="1"
 SUBCMD="${1-none}"
 SUBARG="${2-none}"
 SUBSUBARG="${3-none}"
@@ -335,6 +336,10 @@ create_deployment() {
 
     system_config "$next_dep" "$options"
 
+    if [[ "$HOSTONLY_INITRD" == "1" ]]; then
+        install_hostonly_initrd "$next_dep"
+    fi
+
     mkdir "$SYSROOT/boot/$next_dep"
     boot_files "$next_dep"
 
@@ -472,6 +477,34 @@ install_packages() {
             podman exec --privileged repo-build dnf install -y --installroot="/tmp/$deployment" "${pkg_array[@]}" || :
             ;;
     esac
+}
+
+install_hostonly_initrd() {
+    local deployment="$1"
+    if [[ ! -f "$SYSROOT/usr/.repo" ]]; then
+        printf "Generating a hostonly initramfs on non-repo systems is not supported. Exiting...\n"
+        exit 1
+    fi
+
+    case "$PACKAGE_MANAGER" in
+        "dnf")
+            dracut_initrd "$deployment"
+            ;;
+        *)
+            printf "Generating a hostonly initramfs on non-repo systems is not supported. Exiting...\n"
+            exit 1
+            ;;
+    esac
+}
+
+dracut_initrd() {
+    local deployment="$1"
+    local kver
+    kver="$(ls "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules")"
+    mount --bind "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules" "$SYSROOT/usr/lib/modules"
+    dracut --hostonly --kver "$kver" --reproducible --add "repo" \
+        -f "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules/$kver/initramfs.img"
+    umount -f "$SYSROOT/usr/lib/modules"
 }
 
 selinux_policy() {
@@ -633,7 +666,7 @@ dep() {
         export -n install_packages
     fi
 
-    podman stop -t 2 repo-build &>/dev/null
+    podman stop -t 1 repo-build &>/dev/null
 }
 
 if hash dnf; then
