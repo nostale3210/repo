@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
 set -oueE pipefail
 
-REPO_IMAGE="ghcr.io/nostale3210/repo-utils:latest"
-MAX_DEPS="4"
-HOSTONLY_INITRD="1"
-SUBCMD="${1-none}"
-SUBARG="${2-none}"
-SUBSUBARG="${3-none}"
-
 if [[ "$*" == *"--rootd"* ]]; then
     SYSROOT="${*: -1}"
 else
     SYSROOT=""
 fi
+
+source "$SYSROOT/etc/repo/repo.conf" || :
+
+REPO_IMAGE="${REPO_IMAGE:-ghcr.io/nostale3210/repo-utils:latest}"
+MAX_DEPS="${MAX_DEPS:-4}"
+HOSTONLY_INITRD="${HOSTONLY_INITRD:-1}"
+SUBCMD="${1-none}"
+SUBARG="${2-none}"
+SUBSUBARG="${3-none}"
 
 get_pkg_list() {
     local list="$1"
@@ -460,6 +462,7 @@ init_repo() {
 
     mkdir -p "$SYSROOT/.repo/"{store,deployments/0}
     mkdir -p "$SYSROOT/etc/repo"
+    podman cp repo-tmp:/app/repo.conf "$SYSROOT/etc/repo/repo.conf"
     podman cp repo-tmp:/app/list.pkgs "$SYSROOT/etc/repo/list.pkgs"
     podman cp repo-tmp:/app/scripts "$SYSROOT/etc/repo/scripts"
 
@@ -669,9 +672,9 @@ dep() {
     podman stop -t 1 repo-build &>/dev/null
 }
 
-if hash dnf; then
-    PACKAGE_MANAGER="${PACKAGE_MANAGER:-dnf}"
-    CONTAINER_IMAGE="quay.io/fedora/fedora-minimal:latest"
+if hash dnf || [[ "$PACKAGE_MANAGER" == "dnf" ]] ; then
+    PACKAGE_MANAGER="dnf"
+    CONTAINER_IMAGE="${CONTAINER_IMAGE:-quay.io/fedora/fedora-minimal:latest}"
 else
     printf "No supported package manager detected. Things might break.\n"
 fi

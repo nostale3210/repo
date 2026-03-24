@@ -69,6 +69,7 @@ jobs:
           podman create --privileged -ti --name build \
             --mount type=bind,src=/tmp/certs,dst=/tmp/certs \
             --mount type=bind,src=repo,dst=/repo \
+            --mount type=bind,src=repo.conf,dst=/repo.conf \
             --mount type=bind,src=list.pkgs,dst=/list.pkgs \
             --mount type=bind,src=init,dst=/init \
             --mount type=bind,src=scripts,dst=/scripts \

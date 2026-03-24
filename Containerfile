@@ -9,6 +9,7 @@ FROM alpine:latest AS target
 
 COPY --from=build /move-mount /app/move-mount
 COPY repo /app/repo
+COPY repo.conf /app/repo.conf
 COPY list.pkgs /app/list.pkgs
 COPY init /app/init
 COPY scripts /app/scripts
