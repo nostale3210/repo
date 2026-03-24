@@ -627,46 +627,68 @@ else
     printf "No supported package manager detected. Things might break.\n"
 fi
 
-case "$SUBCMD" in
-    "none")
-        printf "No subcommand was specified!\n"
-        exit 1
-        ;;
-    "dep")
-        printf "Creating new deployment...\n"
-        dep "0" "1" "$SUBARG"
-        ;;
-    "update")
-        printf "Updating store and creating new deployment...\n"
-        dep "0" "1" "$SUBARG"
-        ;;
-    "recreate")
-        printf "Recreating build container and rebuilding store...\n"
-        dep "1" "0" "$SUBARG"
-        ;;
-    "get-orphans")
-        printf "Finding orphaned paths in the store...\n"
-        find_orphans "get"
-        ;;
-    "status")
-        get_dep_stati "$SUBARG"
-        ;;
-    "rm")
-        printf "Removing dep %s...\n" "$SUBARG"
-        cleanup_dep "$SUBARG"
-        ;;
-    "gc")
-        gc_all "$SUBARG"
-        ;;
-    "diff")
-        diff_deps "$SUBARG" "$SUBSUBARG"
-        ;;
-    "activate")
-        printf "Activating deployment %s\n" "$SUBARG"
-        activate_dep "$SUBARG"
-        ;;
-    "init")
-        printf "Initiating repo on the host system...\n"
-        init_repo
-        ;;
-esac
+if [[ "$(id -u)" != "0" ]]; then
+    case "$SUBCMD" in
+        "none")
+            printf "No subcommand was specified!\n"
+            exit 1
+            ;;
+        "get-orphans")
+            printf "Finding orphaned paths in the store...\n"
+            find_orphans "get"
+            ;;
+        "status")
+            get_dep_stati "$SUBARG"
+            ;;
+        "diff")
+            diff_deps "$SUBARG" "$SUBSUBARG"
+            ;;
+        *)
+            printf "Unknown subcommand.\n\"%s\" might require elevated privileges. Exiting...\n" \
+                "$SUBCMD"
+            ;;
+    esac
+else
+    case "$SUBCMD" in
+        "none")
+            printf "No subcommand was specified!\n"
+            exit 1
+            ;;
+        "dep")
+            printf "Creating new deployment...\n"
+            dep "0" "1" "$SUBARG"
+            ;;
+        "recreate")
+            printf "Recreating build container and rebuilding store...\n"
+            dep "1" "0" "$SUBARG"
+            ;;
+        "get-orphans")
+            printf "Finding orphaned paths in the store...\n"
+            find_orphans "get"
+            ;;
+        "status")
+            get_dep_stati "$SUBARG"
+            ;;
+        "rm")
+            printf "Removing dep %s...\n" "$SUBARG"
+            cleanup_dep "$SUBARG"
+            ;;
+        "gc")
+            gc_all "$SUBARG"
+            ;;
+        "diff")
+            diff_deps "$SUBARG" "$SUBSUBARG"
+            ;;
+        "activate")
+            printf "Activating deployment %s\n" "$SUBARG"
+            activate_dep "$SUBARG"
+            ;;
+        "init")
+            printf "Initiating repo on the host system...\n"
+            init_repo
+            ;;
+        *)
+            printf "Unknown subcommand. Exiting...\n"
+            ;;
+    esac
+fi
