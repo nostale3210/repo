@@ -12,6 +12,7 @@ source "$SYSROOT/etc/repo/repo.conf" || :
 REPO_IMAGE="${REPO_IMAGE:-ghcr.io/nostale3210/repo-utils:latest}"
 MAX_DEPS="${MAX_DEPS:-4}"
 HOSTONLY_INITRD="${HOSTONLY_INITRD:-0}"
+PACKAGE_MANAGER="${PACKAGE_MANAGER:-none}"
 SUBCMD="${1-none}"
 SUBARG="${2-none}"
 SUBSUBARG="${3-none}"
