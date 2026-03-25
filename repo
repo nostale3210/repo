@@ -233,7 +233,7 @@ diff_deps() {
     fi
 
     printf "Comparing deployments %s and %s:\n" "$dep1" "$dep2"
-    diff -y "$SYSROOT/.repo/deployments/$dep1/pkgs" "$SYSROOT/.repo/deployments/$dep2/pkgs" |
+    diff -y <(cat "$SYSROOT/.repo/deployments/$dep1/pkgs" | sort) <(cat "$SYSROOT/.repo/deployments/$dep2/pkgs" | sort) |
         grep "<\||\|>" || :
 }
 
