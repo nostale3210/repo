@@ -670,7 +670,7 @@ dep() {
     podman stop -t 1 repo-build &>/dev/null
 }
 
-if hash dnf || [[ "$PACKAGE_MANAGER" == "dnf" ]] ; then
+if hash dnf 2>/dev/null || [[ "$PACKAGE_MANAGER" == "dnf" ]] ; then
     PACKAGE_MANAGER="dnf"
     CONTAINER_IMAGE="${CONTAINER_IMAGE:-quay.io/fedora/fedora-minimal:latest}"
 else
