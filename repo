@@ -298,6 +298,23 @@ create_deployment() {
 
     install_repo "$next_dep"
 
+    mkdir -p "/tmp/$next_dep/"{dev,proc,run,sys,tmp}
+    mount -t proc /proc "/tmp/$next_dep/proc/"
+    mount -t sysfs /sys "/tmp/$next_dep/sys/"
+    mount -t tmpfs tmpfs "/tmp/$next_dep/tmp/"
+    mount --bind /dev "/tmp/$next_dep/dev/"
+    mount --bind /run "/tmp/$next_dep/run/"
+    mount --bind /sys/firmware/efi/efivars "/tmp/$next_dep/sys/firmware/efi/efivars/"
+
+    printf "Running post script...\n"
+    if [[ -f "$SYSROOT/etc/repo/scripts/post.sh" ]]; then
+        cp "$SYSROOT/etc/repo/scripts/post.sh" "/tmp/$next_dep/post.sh"
+        chroot "/tmp/$next_dep" \
+            /usr/bin/env "PATH=/usr/bin" bash /post.sh
+    fi
+
+    umount -Rfl "/tmp/$next_dep/"* 2>/dev/null || :
+
     if [[ "$next_dep" == "0" || "$prev_dep" == "0" ]]; then
         mv -f "/tmp/$next_dep" "$SYSROOT/.repo/deployments/$next_dep"
     else
@@ -331,21 +348,6 @@ create_deployment() {
 
     rm -rf "/tmp/$next_dep"
 
-    mkdir -p "$SYSROOT/.repo/deployments/$next_dep/"{dev,proc,run,sys,tmp}
-    mount -t proc /proc "$SYSROOT/.repo/deployments/$next_dep/proc/"
-    mount -t sysfs /sys "$SYSROOT/.repo/deployments/$next_dep/sys/"
-    mount -t tmpfs tmpfs "$SYSROOT/.repo/deployments/$next_dep/tmp/"
-    mount --bind /dev "$SYSROOT/.repo/deployments/$next_dep/dev/"
-    mount --bind /run "$SYSROOT/.repo/deployments/$next_dep/run/"
-    mount --bind /sys/firmware/efi/efivars "$SYSROOT/.repo/deployments/$next_dep/sys/firmware/efi/efivars/"
-
-    printf "Running post script...\n"
-    if [[ -f "$SYSROOT/etc/repo/scripts/post.sh" ]]; then
-        cp "$SYSROOT/etc/repo/scripts/post.sh" "$SYSROOT/.repo/deployments/$next_dep/post.sh"
-        chroot "$SYSROOT/.repo/deployments/$next_dep" \
-            /usr/bin/env "PATH=/usr/bin" bash /post.sh
-    fi
-
     system_config "$next_dep" "$options"
 
     if [[ "$HOSTONLY_INITRD" == "1" ]]; then
@@ -361,7 +363,6 @@ create_deployment() {
             ;;
     esac
 
-    umount -Rfl "$SYSROOT/.repo/deployments/$next_dep/"* 2>/dev/null || :
 
     printf "%s\n" "$pm_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
     printf "%s\n" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
