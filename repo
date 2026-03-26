@@ -363,8 +363,8 @@ create_deployment() {
 
     umount -Rfl "$SYSROOT/.repo/deployments/$next_dep/"* 2>/dev/null || :
 
-    printf "%s" "$pm_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
-    printf "%s" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
+    printf "%s\n" "$pm_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
+    printf "%s\n" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
 
     export -n next_dep
 
