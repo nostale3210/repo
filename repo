@@ -315,6 +315,10 @@ create_deployment() {
 
     umount -Rfl "/tmp/$next_dep/"* 2>/dev/null || :
 
+    if [[ "$HOSTONLY_INITRD" == "1" ]]; then
+        install_hostonly_initrd "$next_dep"
+    fi
+
     if [[ "$next_dep" == "0" || "$prev_dep" == "0" ]]; then
         mv -f "/tmp/$next_dep" "$SYSROOT/.repo/deployments/$next_dep"
     else
@@ -350,10 +354,6 @@ create_deployment() {
 
     system_config "$next_dep" "$options"
 
-    if [[ "$HOSTONLY_INITRD" == "1" ]]; then
-        install_hostonly_initrd "$next_dep"
-    fi
-
     mkdir "$SYSROOT/boot/$next_dep"
     boot_files "$next_dep"
 
@@ -362,7 +362,6 @@ create_deployment() {
             selinux_policy "$next_dep"
             ;;
     esac
-
 
     printf "%s\n" "$pm_transaction" > "$SYSROOT/.repo/deployments/$next_dep/pkgs"
     printf "%s\n" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
@@ -515,10 +514,10 @@ install_hostonly_initrd() {
 dracut_initrd() {
     local deployment="$1"
     local kver
-    kver="$(ls "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules")"
-    mount --bind "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules" "$SYSROOT/usr/lib/modules"
+    kver="$(ls "/tmp/$deployment/usr/lib/modules")"
+    mount --bind "/tmp/$deployment/usr/lib/modules" "$SYSROOT/usr/lib/modules"
     dracut --hostonly --kver "$kver" --reproducible --add "repo" \
-        -f "$SYSROOT/.repo/deployments/$deployment/usr/lib/modules/$kver/initramfs.img"
+        -f "/tmp/$deployment/usr/lib/modules/$kver/initramfs.img"
     umount -f "$SYSROOT/usr/lib/modules"
 }
 
