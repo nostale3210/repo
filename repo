@@ -26,11 +26,22 @@ get_pkg_list() {
 get_pm_transaction() {
     local mockdir="$1"
     local pkgs="$2"
-    case "$PACKAGE_MANAGER" in
-        "dnf")
-            get_dnf_transaction "$mockdir" "$pkgs"
-            ;;
-    esac
+    local options="$3"
+
+    if [[ "$options" =~ offline ]]; then
+        local prev_dep
+        local next_dep
+        next_dep="$(get_next_deployment)"
+        prev_dep="$((next_dep-1))"
+
+        cat "$SYSROOT/.repo/deployments/$prev_dep/pkgs"
+    else
+        case "$PACKAGE_MANAGER" in
+            "dnf")
+                get_dnf_transaction "$mockdir" "$pkgs"
+                ;;
+        esac
+    fi
 }
 
 get_dnf_transaction() {
@@ -78,6 +89,7 @@ exists_or_install() {
                 exit 255;
             fi
             sleep "$((i*3))"
+            printf "Downloading %s\n" "$pkg"
             pm_download "$pkg" "${pkg_split[0]}"
         fi
     done
@@ -471,11 +483,12 @@ install_packages() {
     local deployment="$1"
     local pm_transaction
     pm_transaction="$(sed "s/\(.*\)$/\/.repo\/store\/\1/" <<< "$2")"
+    printf "Installing packages...\n"
     case "$PACKAGE_MANAGER" in
         "dnf")
             pm_transaction="$(sed "s/$/.rpm/" <<< "$pm_transaction")"
             read -ra pkg_array <<< "$(tr "\n" " " <<< "$pm_transaction")"
-            podman exec --privileged repo-build dnf install -y --installroot="/tmp/$deployment" "${pkg_array[@]}" || :
+            podman exec --privileged repo-build dnf install -y --cacheonly --installroot="/tmp/$deployment" "${pkg_array[@]}" || :
             ;;
     esac
 }
@@ -627,7 +640,7 @@ dep() {
         container_setup
     fi
 
-    if [[ -f "$SYSROOT/etc/repo/scripts/pre.sh" ]]; then
+    if [[ -f "$SYSROOT/etc/repo/scripts/pre.sh" && ! "$options" =~ offline ]]; then
         printf "Running pre script...\n"
         podman exec --privileged repo-build \
             bash /scripts/pre.sh
@@ -645,7 +658,7 @@ dep() {
     export -f pm_download
     export PACKAGE_MANAGER
     declare pm_transaction
-    pm_transaction="$(get_pm_transaction "/empty" "$pkg_list" | tac)"
+    pm_transaction="$(get_pm_transaction "/empty" "$pkg_list" "$options")"
     populate_store "$pm_transaction"
     export -n SYSROOT
     export -n exists_or_install
