@@ -98,9 +98,15 @@ exists_or_install() {
 
 populate_store() {
     local pm_transaction="$1"
+    if mountpoint -q "$SYSROOT/.repo"; then
+        umount -f "$SYSROOT/.repo"
+    fi
     printf "%s" "$pm_transaction" | xargs -P"$(nproc)" -I{} \
         bash -c 'exists_or_install "$@"' _ {} ||
         { printf "Couldn't install some packages. Exiting...\n"; exit 1; }
+    if ! mountpoint -q "$SYSROOT/.repo"; then
+        mount --bind --make-private --ro "$SYSROOT/.repo" "$SYSROOT/.repo"
+    fi
 }
 
 get_deployments() {
@@ -200,11 +206,19 @@ gc_defective() {
 gc_all() {
     local opts="$1"
     if [[ "$opts" == "none" || "$opts" =~ broken ]]; then
+        if mountpoint -q "$SYSROOT/.repo"; then
+            umount -f "$SYSROOT/.repo"
+        fi
+
         printf "Collecting broken deployments...\n"
         gc_defective
     fi
 
     if [[ "$opts" == "none" || "$opts" =~ deps ]]; then
+        if mountpoint -q "$SYSROOT/.repo"; then
+            umount -f "$SYSROOT/.repo"
+        fi
+
         printf "Collecting old deployments...\n"
         local current_deps
         local current_deps_num
@@ -221,8 +235,16 @@ gc_all() {
     fi
 
     if [[ "$opts" == "none" || "$opts" =~ store ]]; then
+        if mountpoint -q "$SYSROOT/.repo"; then
+            umount -f "$SYSROOT/.repo"
+        fi
+
         printf "Finding orphans in store...\n"
         find_orphans "rm"
+    fi
+
+    if ! mountpoint -q "$SYSROOT/.repo"; then
+        mount --bind --make-private --ro "$SYSROOT/.repo" "$SYSROOT/.repo"
     fi
 }
 
@@ -319,6 +341,10 @@ create_deployment() {
         install_hostonly_initrd "$next_dep"
     fi
 
+    if mountpoint -q "$SYSROOT/.repo"; then
+        umount -f "$SYSROOT/.repo"
+    fi
+
     if [[ "$next_dep" == "0" || "$prev_dep" == "0" ]]; then
         mv -f "/tmp/$next_dep" "$SYSROOT/.repo/deployments/$next_dep"
     else
@@ -367,6 +393,10 @@ create_deployment() {
     printf "%s\n" "$next_dep" > "$SYSROOT/.repo/deployments/$next_dep/usr/.repo"
 
     export -n next_dep
+
+    if ! mountpoint -q "$SYSROOT/.repo"; then
+        mount --bind --make-private --ro "$SYSROOT/.repo" "$SYSROOT/.repo"
+    fi
 
     if [[ "$options" =~ activate ]]; then
         printf "Activating deployment %s\n" "$next_dep"
@@ -547,6 +577,10 @@ activate_dep() {
         rm -rf "$SYSROOT/.repo/empty/"{*,.*}
     else
         mkdir "$SYSROOT/.repo/empty"
+    fi
+
+    if ! mountpoint -q "$SYSROOT/.repo"; then
+        mount --bind --make-private --ro "$SYSROOT/.repo" "$SYSROOT/.repo"
     fi
 
     if mountpoint -q "$SYSROOT/usr"; then
