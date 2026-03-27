@@ -585,6 +585,7 @@ activate_dep() {
 
     if mountpoint -q "$SYSROOT/usr"; then
         mount --make-private "$SYSROOT/"
+        mount --make-private "$SYSROOT/.repo"
         mount --make-private "$SYSROOT/usr"
         mount -t overlay usr-root --make-private \
             -o lowerdir="$SYSROOT/.repo/empty:$SYSROOT/.repo/deployments/$deployment/usr" \
@@ -601,8 +602,10 @@ activate_dep() {
         mount --make-private "$SYSROOT/etc"
         move-mount -db "$SYSROOT/.repo/deployments/$deployment/etc" "$SYSROOT/etc"
         umount -fl "$SYSROOT/etc"
+        mount -o remount,rw "$SYSROOT/etc"
     else
-        mount -o bind --make-private "$SYSROOT/.repo/deployments/$deployment/etc" "$SYSROOT/etc"
+        mount --bind --make-private "$SYSROOT/.repo/deployments/$deployment/etc" "$SYSROOT/etc"
+        mount -o remount,rw "$SYSROOT/etc"
     fi
 }
 
