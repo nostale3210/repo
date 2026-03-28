@@ -352,9 +352,6 @@ create_deployment() {
         printf "Hardlinking previous deployment...\n"
         rsync -aHlx --link-dest="../../$prev_dep/usr/" "$SYSROOT/.repo/deployments/$prev_dep/usr/" "$SYSROOT/.repo/deployments/$next_dep/usr/"
 
-        printf "Syncing previous config...\n"
-        rsync -aHlx "$SYSROOT/.repo/deployments/$prev_dep/etc/" "$SYSROOT/.repo/deployments/$next_dep/etc/"
-
         printf "Syncing next directory skeleton...\n"
         rsync -ac -f"+ */" -f"- *" --delete "/tmp/$next_dep/" "$SYSROOT/.repo/deployments/$next_dep/"
 
