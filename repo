@@ -768,7 +768,13 @@ else
             ;;
         "rm")
             printf "Removing dep %s...\n" "$SUBARG"
+            if mountpoint -q "$SYSROOT/.repo"; then
+                umount -f "$SYSROOT/.repo"
+            fi
             cleanup_dep "$SUBARG"
+            if ! mountpoint -q "$SYSROOT/.repo"; then
+                mount --bind --make-private --ro "$SYSROOT/.repo" "$SYSROOT/.repo"
+            fi
             ;;
         "gc")
             gc_all "$SUBARG"
