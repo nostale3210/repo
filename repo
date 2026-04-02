@@ -375,6 +375,9 @@ create_deployment() {
 
     rm -rf "/tmp/$next_dep"
 
+    chmod 4755 "$SYSROOT/.repo/deployments/$next_dep/usr/bin/newgidmap" || :
+    chmod 4755 "$SYSROOT/.repo/deployments/$next_dep/usr/bin/newuidmap" || :
+
     system_config "$next_dep" "$options"
 
     mkdir "$SYSROOT/boot/$next_dep"
