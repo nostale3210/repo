@@ -458,6 +458,10 @@ boot_files() {
         cat "$SYSROOT/etc/repo/boot.conf" | sed "s/INSERT_DEPLOYMENT/$deployment/g" > "$SYSROOT/boot/loader/entries/$deployment.conf"
     fi
 
+    if hash bootctl; then
+        bootctl set-default "*$deployment*"
+    fi
+
     if hash sbctl && [[ -d "$SYSROOT/var/lib/sbctl" ]]; then
         if [[ "$boot_type" == "uki" ]]; then
             sbctl sign "$SYSROOT/boot/EFI/Linux/$deployment.efi"
