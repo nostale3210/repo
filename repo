@@ -320,6 +320,11 @@ create_deployment() {
 
     install_repo "$next_dep"
 
+    if [[ -f "$SYSROOT/etc/pki/akmods/private/private_key.priv" ]]; then
+        mkdir -p "/tmp/$next_dep/etc/pki/akmods/private"
+        cp -f "$SYSROOT/etc/pki/akmods/private/"* "/tmp/$next_dep/etc/pki/akmods/private/"
+    fi
+
     mkdir -p "/tmp/$next_dep/"{dev,proc,run,sys,tmp}
     mount -t proc /proc "/tmp/$next_dep/proc/"
     mount -t sysfs /sys "/tmp/$next_dep/sys/"
