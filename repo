@@ -416,6 +416,10 @@ system_config() {
     printf "Syncing system config...\n"
     find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
 
+    sort -t: -u -k1,1 "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployment/etc/passwd" > "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp"
+    sort -t: -u -k1,1 "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployment/etc/shadow" > "$SYSROOT/.repo/deployments/$deployment/etc/shadow.tmp"
+    sort -t: -u -k1,1 "$SYSROOT/etc/group" "$SYSROOT/.repo/deployments/$deployment/etc/group" > "$SYSROOT/.repo/deployments/$deployment/etc/group.tmp"
+
     if [[ ! "$options" =~ drop ]]; then
         find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/" || :
     fi
@@ -429,12 +433,9 @@ system_config() {
         "$SYSROOT/etc/sudoers" "$SYSROOT/etc/repo" \
         "$SYSROOT/.repo/deployments/$deployment/" 2>/dev/null || :
 
-    sort "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployment/etc/passwd" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp" &&
-        mv "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
-    sort "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployment/etc/shadow" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/shadow.tmp" &&
-        mv "$SYSROOT/.repo/deployments/$deployment/etc/shadow.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
-    sort "$SYSROOT/etc/group" "$SYSROOT/.repo/deployments/$deployment/etc/group" | awk -F':' '!a[$1]++' > "$SYSROOT/.repo/deployments/$deployment/etc/group.tmp" &&
-        mv "$SYSROOT/.repo/deployments/$deployment/etc/group.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/group"
+    mv -f "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
+    mv -f "$SYSROOT/.repo/deployments/$deployment/etc/shadow.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
+    mv -f "$SYSROOT/.repo/deployments/$deployment/etc/group.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/group"
 }
 
 boot_files() {
