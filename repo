@@ -320,10 +320,7 @@ create_deployment() {
 
     install_repo "$next_dep"
 
-    if [[ -f "$SYSROOT/etc/pki/akmods/private/private_key.priv" ]]; then
-        mkdir -p "/tmp/$next_dep/etc/pki/akmods/private"
-        cp -f "$SYSROOT/etc/pki/akmods/private/"* "/tmp/$next_dep/etc/pki/akmods/private/"
-    fi
+    system_config "$next_dep" "$options"
 
     mkdir -p "/tmp/$next_dep/"{dev,proc,run,sys,tmp}
     mount -t proc /proc "/tmp/$next_dep/proc/"
@@ -383,8 +380,6 @@ create_deployment() {
     chmod 4755 "$SYSROOT/.repo/deployments/$next_dep/usr/bin/newgidmap" || :
     chmod 4755 "$SYSROOT/.repo/deployments/$next_dep/usr/bin/newuidmap" || :
 
-    system_config "$next_dep" "$options"
-
     mkdir "$SYSROOT/boot/$next_dep"
     boot_files "$next_dep"
 
@@ -414,14 +409,14 @@ system_config() {
     local options="$2"
 
     printf "Syncing system config...\n"
-    find "$SYSROOT/.repo/deployments/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
+    find "/tmp/$deployment/etc" -mindepth 1 -execdir sh -c "touch -d @0 '{}' &>/dev/null || :" \;
 
-    sort -t: -u -k1,1 "$SYSROOT/etc/passwd" "$SYSROOT/.repo/deployments/$deployment/etc/passwd" > "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp"
-    sort -t: -u -k1,1 "$SYSROOT/etc/shadow" "$SYSROOT/.repo/deployments/$deployment/etc/shadow" > "$SYSROOT/.repo/deployments/$deployment/etc/shadow.tmp"
-    sort -t: -u -k1,1 "$SYSROOT/etc/group" "$SYSROOT/.repo/deployments/$deployment/etc/group" > "$SYSROOT/.repo/deployments/$deployment/etc/group.tmp"
+    sort -t: -u -k1,1 "$SYSROOT/etc/passwd" "/tmp/$deployment/etc/passwd" > "/tmp/$deployment/etc/passwd.tmp"
+    sort -t: -u -k1,1 "$SYSROOT/etc/shadow" "/tmp/$deployment/etc/shadow" > "/tmp/$deployment/etc/shadow.tmp"
+    sort -t: -u -k1,1 "$SYSROOT/etc/group" "/tmp/$deployment/etc/group" > "/tmp/$deployment/etc/group.tmp"
 
     if [[ ! "$options" =~ drop ]]; then
-        find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "$SYSROOT/.repo/deployments/$deployment/" || :
+        find "$SYSROOT/etc" -newermt @0 -print0 2>/dev/null | xargs -0 -I{} cp -fa --parents {} "/tmp/$deployment/" || :
     fi
 
     cp -rfa --parents "$SYSROOT/etc/fstab" "$SYSROOT/etc/crypttab" "$SYSROOT/etc/locale.conf" \
@@ -431,11 +426,11 @@ system_config() {
         "$SYSROOT/etc/pki" "$SYSROOT/etc/firewalld" "$SYSROOT/etc/environment" \
         "$SYSROOT/etc/hostname" "$SYSROOT/etc/X11/xorg.conf.d/00-keyboard.conf" \
         "$SYSROOT/etc/sudoers" "$SYSROOT/etc/repo" \
-        "$SYSROOT/.repo/deployments/$deployment/" 2>/dev/null || :
+        "/tmp/$deployment/" 2>/dev/null || :
 
-    mv -f "$SYSROOT/.repo/deployments/$deployment/etc/passwd.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/passwd"
-    mv -f "$SYSROOT/.repo/deployments/$deployment/etc/shadow.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/shadow"
-    mv -f "$SYSROOT/.repo/deployments/$deployment/etc/group.tmp" "$SYSROOT/.repo/deployments/$deployment/etc/group"
+    mv -f "/tmp/$deployment/etc/passwd.tmp" "/tmp/$deployment/etc/passwd"
+    mv -f "/tmp/$deployment/etc/shadow.tmp" "/tmp/$deployment/etc/shadow"
+    mv -f "/tmp/$deployment/etc/group.tmp" "/tmp/$deployment/etc/group"
 }
 
 boot_files() {
