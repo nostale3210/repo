@@ -565,12 +565,13 @@ selinux_policy() {
     local deployment="$1"
 
     printf "Relabeling deployment %s...\n" "$deployment"
-    # podman exec --privileged repo-build \
-    #     restorecon -RF "$SYSROOT/boot" || :
-
     chroot "$SYSROOT/.repo/deployments/$deployment" /usr/bin/env "PATH=/usr/bin" \
-        setfiles -F -T"$(nproc)" \
+        setfiles -F -T0 \
         /etc/selinux/targeted/contexts/files/file_contexts / || :
+
+    if hash restorecon 2>/dev/null; then
+        restorecon -RF "$SYSROOT/boot" || :
+    fi
 }
 
 activate_dep() {
@@ -593,18 +594,19 @@ activate_dep() {
         mount --bind --make-private --ro "$SYSROOT/.repo" "$SYSROOT/.repo"
     fi
 
+    # context="system_u:object_r:usr_t:s0"
     if mountpoint -q "$SYSROOT/usr"; then
         mount --make-private "$SYSROOT/"
         mount --make-private "$SYSROOT/.repo"
         mount --make-private "$SYSROOT/usr"
         mount -t overlay usr-root --make-private \
-            -o lowerdir="$SYSROOT/.repo/empty:$SYSROOT/.repo/deployments/$deployment/usr" \
+            -o lowerdir="$SYSROOT/.repo/deployments/$deployment/usr:$SYSROOT/.repo/empty" \
             "$SYSROOT/.repo/empty"
         move-mount -mb "$SYSROOT/.repo/empty" "$SYSROOT/usr"
         umount -fl "$SYSROOT/usr"
     else
         mount -t overlay usr-root --make-private \
-            -o lowerdir="$SYSROOT/.repo/empty:$SYSROOT/.repo/deployments/$deployment/usr" \
+            -o lowerdir="$SYSROOT/.repo/deployments/$deployment/usr:$SYSROOT/.repo/empty" \
             "$SYSROOT/usr"
     fi
 
