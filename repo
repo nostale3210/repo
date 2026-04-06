@@ -320,6 +320,10 @@ create_deployment() {
 
     install_repo "$next_dep"
 
+    if [[ -d "$SYSROOT/etc/repo/files" ]]; then
+        cp -rf "$SYSROOT/etc/repo/files/"* "/tmp/$next_dep/"
+    fi
+
     system_config "$next_dep" "$options"
 
     mkdir -p "/tmp/$next_dep/"{dev,proc,run,sys,tmp}
