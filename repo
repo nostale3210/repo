@@ -69,7 +69,7 @@ pm_download() {
 dnf_download() {
     local pkg="$1"
     local pkg_name="$2"
-    rm -f "/tmp/$pkg_name*.rpm" 2>/dev/null || :
+    rm -f "/tmp/$pkg_name"*.rpm 2>/dev/null || :
     podman exec --privileged repo-build bash -c "dnf download -y --destdir /tmp ${pkg//@/-} &&
     mv -f /tmp/$pkg_name*.rpm /.repo/store/$pkg.rpm &&
     touch /.repo/store/$pkg.repo-lock"
