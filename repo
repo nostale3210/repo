@@ -294,7 +294,8 @@ container_setup() {
 container_metadata_update() {
     case "$PACKAGE_MANAGER" in
         "dnf")
-            podman exec --privileged repo-build dnf makecache -y --refresh
+            podman exec --privileged repo-build dnf update -y --refresh
+            podman exec --privileged repo-build bash -c 'rm -rf /empty/{*,.*}'
             podman exec --privileged repo-build \
                 dnf makecache -y --refresh --use-host-config --installroot /empty
             ;;
